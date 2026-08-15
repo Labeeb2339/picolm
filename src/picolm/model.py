@@ -17,6 +17,46 @@ import torch.nn.functional as F
 from picolm.config import ModelConfig
 
 
+class RMSNorm(nn.Module):
+    """Root-mean-square layer norm (LLaMA-style) — normalize by RMS, no bias.
+
+    Cheaper than LayerNorm (no mean subtraction) and matches the modern
+    transformer recipe (LLaMA/Mistral/Gemma). ``x -> x / rms(x) * weight``.
+    """
+
+    def __init__(self, dim: int, eps: float = 1e-6) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(dim))
+        self.eps = eps
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        rms = x.pow(2).mean(-1, keepdim=True).add(self.eps).sqrt()
+        return x / rms * self.weight
+
+
+def precompute_rope(head_size: int, max_len: int, base: float = 10000.0):
+    """Precompute rotary-embedding cos/sin tables (shape ``(max_len, head_size//2)``)."""
+    inv_freq = 1.0 / (base ** (torch.arange(0, head_size, 2).float() / head_size))
+    pos = torch.arange(max_len).float()
+    angles = pos[:, None] * inv_freq[None, :]
+    return angles.cos(), angles.sin()
+
+
+def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+    """Apply rotary position embeddings to ``x`` of shape ``(B, H, T, D)``.
+
+    Rotates each pair ``(i, i + D/2)`` by ``angle[i]`` (the half-split / GPT-NeoX
+    RoPE convention). This is a norm-preserving rotation that encodes *relative*
+    position in the attention dot product, so it generalizes to sequences longer
+    than the training window better than learned absolute embeddings.
+    """
+    d = x.shape[-1]
+    x1, x2 = x[..., : d // 2], x[..., d // 2 :]
+    cos = cos[None, None]  # (1, 1, T, D//2)
+    sin = sin[None, None]
+    return torch.cat([x1 * cos - x2 * sin, x2 * cos + x1 * sin], dim=-1)
+
+
 class CausalSelfAttention(nn.Module):
     """Multi-head self-attention with a causal (lower-triangular) mask.
 
@@ -50,6 +90,13 @@ class CausalSelfAttention(nn.Module):
         # T is divisible by 64. Falls back to eager attention otherwise.
         self.use_flash = False
 
+        # Optional rotary position embeddings (RoPE, LLaMA-style).
+        self.use_rope = config.rope
+        if self.use_rope:
+            cos, sin = precompute_rope(self.head_size, config.block_size)
+            self.register_buffer("rope_cos", cos)
+            self.register_buffer("rope_sin", sin)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()
 
@@ -58,6 +105,10 @@ class CausalSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, self.head_size).transpose(1, 2)
         k = k.view(B, T, self.n_head, self.head_size).transpose(1, 2)
         v = v.view(B, T, self.n_head, self.head_size).transpose(1, 2)
+
+        if self.use_rope:
+            q = apply_rope(q, self.rope_cos[:T], self.rope_sin[:T])
+            k = apply_rope(k, self.rope_cos[:T], self.rope_sin[:T])
 
         # Optional Triton FlashAttention path (single-pass, O(N) memory).
         if self.use_flash and T % 64 == 0:
@@ -102,9 +153,13 @@ class Block(nn.Module):
 
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
-        self.ln_1 = nn.LayerNorm(config.n_embd, bias=config.bias)
+        if config.rmsnorm:
+            self.ln_1 = RMSNorm(config.n_embd)
+            self.ln_2 = RMSNorm(config.n_embd)
+        else:
+            self.ln_1 = nn.LayerNorm(config.n_embd, bias=config.bias)
+            self.ln_2 = nn.LayerNorm(config.n_embd, bias=config.bias)
         self.attn = CausalSelfAttention(config)
-        self.ln_2 = nn.LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -121,15 +176,15 @@ class GPT(nn.Module):
         config.validate()
         self.config = config
 
-        self.transformer = nn.ModuleDict(
-            dict(
-                wte=nn.Embedding(config.vocab_size, config.n_embd),
-                wpe=nn.Embedding(config.block_size, config.n_embd),
-                drop=nn.Dropout(config.dropout),
-                h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-                ln_f=nn.LayerNorm(config.n_embd, bias=config.bias),
-            )
+        modules = dict(
+            wte=nn.Embedding(config.vocab_size, config.n_embd),
+            drop=nn.Dropout(config.dropout),
+            h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+            ln_f=RMSNorm(config.n_embd) if config.rmsnorm else nn.LayerNorm(config.n_embd, bias=config.bias),
         )
+        if not config.rope:
+            modules["wpe"] = nn.Embedding(config.block_size, config.n_embd)
+        self.transformer = nn.ModuleDict(modules)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
         # Weight tying: the output projection shares the input embedding matrix.
@@ -157,7 +212,7 @@ class GPT(nn.Module):
 
     def get_num_params(self, non_embedding: bool = True) -> int:
         n = sum(p.numel() for p in self.parameters())
-        if non_embedding:
+        if non_embedding and "wpe" in self.transformer:
             n -= self.transformer.wpe.weight.numel()  # positional embeddings
         return n
 
@@ -178,10 +233,13 @@ class GPT(nn.Module):
             f"sequence length {T} exceeds block_size {self.config.block_size}"
         )
 
-        pos = torch.arange(0, T, dtype=torch.long, device=idx.device)
         tok_emb = self.transformer.wte(idx)  # (B, T, C)
-        pos_emb = self.transformer.wpe(pos)  # (T, C)
-        x = self.transformer.drop(tok_emb + pos_emb)
+        if self.config.rope:
+            x = self.transformer.drop(tok_emb)  # RoPE injects position in attention
+        else:
+            pos = torch.arange(0, T, dtype=torch.long, device=idx.device)
+            pos_emb = self.transformer.wpe(pos)  # (T, C)
+            x = self.transformer.drop(tok_emb + pos_emb)
 
         for block in self.transformer.h:
             x = block(x)

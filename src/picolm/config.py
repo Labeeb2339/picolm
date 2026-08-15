@@ -25,6 +25,8 @@ class ModelConfig:
     n_embd: int = 384             # embedding / residual dimension
     dropout: float = 0.0          # dropout probability (0 for inference)
     bias: bool = False            # use bias in LayerNorm/linear layers (GPT-2: no)
+    rmsnorm: bool = False         # use RMSNorm instead of LayerNorm (LLaMA-style)
+    rope: bool = False            # rotary position embeddings instead of learned wpe
 
     @property
     def head_size(self) -> int:
