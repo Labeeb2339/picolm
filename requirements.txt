@@ -1,0 +1,5 @@
+# Install PyTorch FIRST, from the index matching your hardware:
+#   CPU only:        pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   NVIDIA CUDA 12.8: pip install torch --index-url https://download.pytorch.org/whl/cu128
+torch>=2.1
+numpy>=1.24

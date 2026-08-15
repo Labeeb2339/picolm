@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "picolm"
+version = "1.0.0"
+description = "A GPT-style language model built from scratch in PyTorch: hand-written BPE tokenizer, causal transformer, mixed-precision training, KV-cache inference, and int8 quantization."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Muhammad Labeeb Aryan Bin Mohd Lokman" }]
+keywords = ["gpt", "transformer", "llm", "pytorch", "language-model", "from-scratch", "bpe", "inference"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# NOTE: torch is intentionally NOT listed here — install it explicitly from the
+# correct index (see README / requirements.txt): the default PyPI wheel bundles
+# CUDA and is ~2 GB. CPU: --index-url .../whl/cpu ; CUDA 12.8: .../whl/cu128
+dependencies = [
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+demo = ["streamlit>=1.30"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+picolm = "picolm.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Labeeb2339/picolm"
+Repository = "https://github.com/Labeeb2339/picolm"
+Issues = "https://github.com/Labeeb2339/picolm/issues"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
