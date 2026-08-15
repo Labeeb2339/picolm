@@ -45,6 +45,11 @@ class CausalSelfAttention(nn.Module):
         self.record_attn = False
         self.attn_weights: torch.Tensor | None = None
 
+        # Optional Triton FlashAttention path (off by default). Requires Triton
+        # + CUDA, and it casts to fp16 — so it's for fp16/bf16 inference where
+        # T is divisible by 64. Falls back to eager attention otherwise.
+        self.use_flash = False
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()
 
@@ -54,7 +59,17 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, self.head_size).transpose(1, 2)
         v = v.view(B, T, self.n_head, self.head_size).transpose(1, 2)
 
-        # Scaled dot-product attention.
+        # Optional Triton FlashAttention path (single-pass, O(N) memory).
+        if self.use_flash and T % 64 == 0:
+            from picolm.flash_attn import flash_attention, flash_available
+
+            if flash_available():
+                y = flash_attention(q, k, v)  # (B, n_head, T, head_size)
+                y = y.transpose(1, 2).contiguous().view(B, T, C)
+                y = self.resid_dropout(self.c_proj(y))
+                return y
+
+        # Scaled dot-product attention (eager fallback).
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(self.head_size))
         att = att.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))
         att = F.softmax(att, dim=-1)
