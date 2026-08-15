@@ -41,6 +41,10 @@ class CausalSelfAttention(nn.Module):
         )
         self.register_buffer("mask", mask)
 
+        # Optional attention-weight capture for visualization.
+        self.record_attn = False
+        self.attn_weights: torch.Tensor | None = None
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()
 
@@ -54,6 +58,8 @@ class CausalSelfAttention(nn.Module):
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(self.head_size))
         att = att.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))
         att = F.softmax(att, dim=-1)
+        if self.record_attn:
+            self.attn_weights = att.detach()
         att = self.attn_dropout(att)
 
         y = att @ v  # (B, n_head, T, head_size)
@@ -174,6 +180,24 @@ class GPT(nn.Module):
                 logits.view(-1, logits.size(-1)), targets.view(-1)
             )
         return logits, loss
+
+    @torch.no_grad()
+    def forward_with_attention(
+        self, idx: torch.Tensor
+    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        """Forward pass that also returns per-layer attention maps.
+
+        Returns ``(logits, attention_maps)`` where ``attention_maps`` is a list
+        with one ``(B, n_head, T, T)`` tensor per transformer block.
+        """
+        blocks = self.transformer.h
+        for block in blocks:
+            block.attn.record_attn = True
+        logits, _ = self.forward(idx)
+        maps = [block.attn.attn_weights for block in blocks]
+        for block in blocks:
+            block.attn.record_attn = False
+        return logits, maps
 
     @torch.no_grad()
     def generate(

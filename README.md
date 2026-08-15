@@ -88,6 +88,18 @@ picolm demo
                           logits (B, T, V)
 ```
 
+## 🖥️ Dashboard
+
+`picolm demo` launches an interactive visualization dashboard with five views:
+
+| View | What it shows |
+|---|---|
+| **Generate** | interactive text generation with live sampling knobs |
+| **Attention** | per-layer, per-head attention maps — the causal triangle, visible |
+| **Sampling** | the next-token probability distribution reshaped by temperature/top-k/top-p |
+| **Quantization** | float32 weights snapping onto int8 buckets, plus size + compression |
+| **Training** | the loss curve and the cosine learning-rate schedule |
+
 ## 📊 Results
 
 The demo model (~10.6M parameters) is trained on the [tiny Shakespeare]

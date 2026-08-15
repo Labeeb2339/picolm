@@ -82,3 +82,16 @@ def test_causal_masking():
     # Positions 0..13 must be identical; only 14..15 may change.
     assert torch.allclose(logits_a[0, :14], logits_b[0, :14], atol=1e-6)
     assert not torch.allclose(logits_a[0, -1], logits_b[0, -1])
+
+
+def test_forward_with_attention():
+    """Attention maps are returned with the right shape and causal mask."""
+    model = make_model().eval()
+    idx = torch.randint(0, 65, (1, 8))
+    logits, maps = model.forward_with_attention(idx)
+    assert logits.shape == (1, 8, 65)
+    assert len(maps) == 2  # n_layer == 2
+    for m in maps:
+        assert m.shape == (1, 2, 8, 8)  # (B, n_head, T, T)
+        # Strictly upper triangle (future positions) must be exactly zero.
+        assert m[0, 0].triu(diagonal=1).abs().max() == 0.0
