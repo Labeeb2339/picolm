@@ -112,6 +112,13 @@ so the gap widens rapidly with sequence length and model size.
 - **Generated text is not factual.** It produces plausible Shakespeare-flavoured
   prose, not information.
 
+## Visualization
+
+`picolm demo` launches an interactive dashboard (Streamlit) that visualizes
+the internals: per-layer/head attention maps (the causal triangle), the
+next-token probability distribution under temperature/top-k/top-p, fp32-vs-int8
+weight histograms, and the training loss + LR curves.
+
 ## Reproducibility
 
 ```bash
