@@ -20,7 +20,13 @@ import math
 import sys
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import streamlit as st
 import torch
 
@@ -85,6 +91,15 @@ with st.sidebar:
             f"val loss {metrics['best_val_loss']:.3f} · "
             f"{metrics['max_iters']:,} iters · {metrics['dtype']}"
         )
+    st.divider()
+    st.header("Architecture")
+    cfg = model.config
+    st.caption(
+        f"**{cfg.n_layer}** layers · **{cfg.n_head}** heads · "
+        f"**{cfg.n_embd}**-dim embeddings\n\n"
+        f"block size **{cfg.block_size}** · vocab **{cfg.vocab_size}** · "
+        f"tokenizer **{metrics.get('tokenizer', 'char') if metrics else 'char'}**"
+    )
 
 # ---------------------------------------------------------------------------
 # Tabs
@@ -115,8 +130,11 @@ with tab_gen:
         idx = torch.tensor([ids], dtype=torch.long, device=device)
         with torch.inference_mode():
             out = model.generate(
-                idx, max_tokens, temperature,
+                idx,
+                max_tokens,
+                temperature,
                 top_k if top_k > 0 else None,
+                top_p if top_p > 0 else None,
             )
         st.text_area("Output", value=tok.decode(out[0].tolist()), height=220)
 
@@ -297,7 +315,6 @@ with tab_train:
         st.info("No `metrics.json` found next to the checkpoint.")
     else:
         st.markdown("**Loss curve** — train and validation loss over training.")
-        import pandas as pd
 
         eval_interval = metrics.get("eval_interval", 250)
         xs = [i * eval_interval for i in range(len(metrics["val_loss"]))]

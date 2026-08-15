@@ -4,7 +4,7 @@
 
 **A GPT-style language model built from scratch in PyTorch.**
 
-*Hand-written byte-pair-encoding tokenizer · causal transformer · mixed-precision GPU training · KV-cache inference engine · int8 quantization — all with zero pretrained weights and zero LLM libraries.*
+*Hand-written tokenizers (char + byte-pair BPE) · causal transformer · mixed-precision GPU training · KV-cache inference engine · int8 quantization — all with zero pretrained weights and zero LLM libraries.*
 
 ![CI](https://github.com/Labeeb2339/picolm/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
@@ -24,7 +24,7 @@ be read and understood.
 
 | Component | What it is |
 |-----------|------------|
-| **BPE tokenizer** | Byte-pair encoding trained on raw UTF-8 bytes (GPT-2 style), implemented from scratch |
+| **Tokenizers** | Char-level (ships with the demo model) + byte-level BPE (GPT-2 style), both from scratch |
 | **Transformer** | Multi-head causal self-attention, GELU MLP, pre-norm residual blocks, weight tying |
 | **Training** | Mixed-precision (bfloat16) loop with AdamW, cosine LR + warmup, gradient clipping, checkpointing |
 | **Inference** | KV-cache decoder that reuses past key/value states, plus top-k / top-p sampling |
@@ -166,11 +166,13 @@ The wanting upon it
 
 ## 🔬 How it works
 
-**Tokenizer.** [`picolm/tokenizer.py`](src/picolm/tokenizer.py) implements a
-byte-level BPE tokenizer. The base vocabulary is the 256 raw bytes; training
-repeatedly fuses the most frequent adjacent byte pair until the target
-vocabulary size is reached. Encoding applies the learned merges greedily, and
-decoding is lossless by construction.
+**Tokenizer.** [`picolm/tokenizer.py`](src/picolm/tokenizer.py) implements two
+tokenizers from scratch. `CharTokenizer` maps every unique character to an id —
+the demo model trains on tiny Shakespeare with a 65-character vocabulary. A
+byte-level `BPETokenizer` is also included: its base vocabulary is the 256 raw
+bytes, training repeatedly fuses the most frequent adjacent byte pair until the
+target size is reached, and encoding applies the learned merges greedily (pass
+`--tokenizer bpe` to train with it). Decoding is lossless in both.
 
 **Model.** [`picolm/model.py`](src/picolm/model.py) is a decoder-only
 transformer: token + positional embeddings, a stack of pre-norm blocks
@@ -207,7 +209,7 @@ picolm/
 │   └── demo.py          # Streamlit demo
 ├── MODEL_CARD.md        # full methodology, results, limitations
 ├── scripts/             # no-install entry points + plotting
-├── tests/               # pytest suite (18 tests)
+├── tests/               # pytest suite (19 tests)
 └── .github/workflows/   # CI
 ```
 
@@ -215,7 +217,7 @@ picolm/
 
 ```bash
 pip install -e ".[dev]"
-pytest          # 18 tests: tokenizer round-trips, causality, KV-cache == eager, baselines, quantization
+pytest          # 19 tests: tokenizer round-trips, causality, KV-cache == eager, baselines, quantization, attention maps
 ```
 
 ## 📄 License & attribution

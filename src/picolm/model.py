@@ -206,8 +206,9 @@ class GPT(nn.Module):
         max_new_tokens: int,
         temperature: float = 1.0,
         top_k: int | None = None,
+        top_p: float | None = None,
     ) -> torch.Tensor:
-        """Autoregressive generation (temperature + optional top-k)."""
+        """Autoregressive generation (temperature + optional top-k / top-p)."""
         self.eval()
         for _ in range(max_new_tokens):
             idx_cond = (
@@ -218,9 +219,19 @@ class GPT(nn.Module):
             logits, _ = self(idx_cond)
             logits = logits[:, -1, :] / max(temperature, 1e-6)
 
-            if top_k is not None:
+            if top_k is not None and top_k > 0:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
                 logits[logits < v[:, [-1]]] = float("-inf")
+
+            if top_p is not None and 0.0 < top_p < 1.0:
+                sorted_logits, sorted_idx = torch.sort(logits, descending=True)
+                cum = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                remove = cum > top_p
+                remove[..., 1:] = remove[..., :-1].clone()
+                remove[..., 0] = 0
+                keep = torch.zeros_like(logits, dtype=torch.bool)
+                keep.scatter_(1, sorted_idx, ~remove)
+                logits[~keep] = float("-inf")
 
             probs = F.softmax(logits, dim=-1)
             idx_next = torch.multinomial(probs, num_samples=1)

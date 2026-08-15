@@ -140,7 +140,7 @@ def _cmd_generate(args) -> int:
             )
         else:
             out = model.generate(
-                idx, args.max_tokens, args.temperature, args.top_k
+                idx, args.max_tokens, args.temperature, args.top_k, args.top_p
             )
         text = tok.decode(out[0].tolist())
         if args.num_samples > 1:
