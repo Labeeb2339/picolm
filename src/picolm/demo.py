@@ -136,7 +136,7 @@ with tab_attn:
     n_layer = model.config.n_layer
     n_head = model.config.n_head
     layer = st.slider("Layer", 0, n_layer - 1, 0)
-    head = st.slider("Head", 0, n_head - 1, 0)
+    show_all = st.toggle("Show all heads in this layer", value=False)
 
     ids = tok.encode(prompt) if prompt else [0]
     T = len(ids)
@@ -146,20 +146,41 @@ with tab_attn:
     idx = torch.tensor([ids], dtype=torch.long, device=device)
 
     _, maps = model.forward_with_attention(idx)
-    attn = maps[layer][0, head].cpu().numpy()  # (T, T)
-
     labels = [tok_label(tok, i) for i in ids]
-    fig, ax = plt.subplots(figsize=(max(6, T * 0.4), max(5, T * 0.4)))
-    im = ax.imshow(attn, cmap="viridis", aspect="auto")
-    ax.set_xticks(range(T))
-    ax.set_xticklabels(labels, fontsize=9)
-    ax.set_yticks(range(T))
-    ax.set_yticklabels(labels, fontsize=9)
-    plt.setp(ax.get_xticklabels(), rotation=90)
-    ax.set_xlabel("attended token")
-    ax.set_ylabel("query token")
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="attention weight")
-    st.pyplot(fig)
+
+    if show_all:
+        ncols = min(3, n_head)
+        nrows = -(-n_head // ncols)
+        fig, axes = plt.subplots(
+            nrows, ncols, figsize=(ncols * 3.2, nrows * 2.8), squeeze=False
+        )
+        for h in range(n_head):
+            ax = axes[h // ncols][h % ncols]
+            im = ax.imshow(maps[layer][0, h].cpu().numpy(), cmap="magma", aspect="auto")
+            ax.set_title(f"head {h}", fontsize=9)
+            ax.set_xticks([])
+            ax.set_yticks([])
+        for h in range(n_head, nrows * ncols):
+            axes[h // ncols][h % ncols].axis("off")
+        fig.suptitle(f"All attention heads — layer {layer}", fontsize=12)
+        fig.tight_layout()
+        st.pyplot(fig)
+    else:
+        head = st.slider("Head", 0, n_head - 1, 0)
+        attn = maps[layer][0, head].cpu().numpy()  # (T, T)
+        fig, ax = plt.subplots(figsize=(max(6, T * 0.4), max(5, T * 0.4)))
+        im = ax.imshow(attn, cmap="magma", aspect="auto")
+        ax.set_xticks(range(T))
+        ax.set_xticklabels(labels, fontsize=9)
+        ax.set_yticks(range(T))
+        ax.set_yticklabels(labels, fontsize=9)
+        plt.setp(ax.get_xticklabels(), rotation=90)
+        ax.set_xlabel("attended token")
+        ax.set_ylabel("query token")
+        ax.set_title(f"Attention — layer {layer}, head {head}")
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="attention weight")
+        fig.tight_layout()
+        st.pyplot(fig)
 
 # ===========================================================================
 # Sampling
@@ -244,6 +265,16 @@ with tab_quant:
     ax.legend()
     fig.tight_layout()
     st.pyplot(fig)
+
+    # Quantization error — the round-trip residual (w - dequantized int8).
+    err = (w - deq).ravel()
+    fig2, ax2 = plt.subplots(figsize=(8, 2.6))
+    ax2.hist(err, bins=100, color="tab:red", alpha=0.75)
+    ax2.set_xlabel("quantization error (w − w_int8)")
+    ax2.set_ylabel("count")
+    ax2.set_title("Quantization error distribution")
+    fig2.tight_layout()
+    st.pyplot(fig2)
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Scale", f"{scales[sel]:.4g}")

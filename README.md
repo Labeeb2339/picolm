@@ -100,6 +100,22 @@ picolm demo
 | **Quantization** | float32 weights snapping onto int8 buckets, plus size + compression |
 | **Training** | the loss curve and the cosine learning-rate schedule |
 
+### What you'll see
+
+**Causal self-attention** — each row is a query token; the lower-triangular
+shape is the causal mask (a token can only attend to itself and the past):
+
+![attention map](assets/attention.png)
+
+**Quantization** — the smooth float32 weight distribution (blue) snaps onto
+255 discrete int8 buckets (orange):
+
+![quantization](assets/quantization.png)
+
+**Sampling** — the model's confidence over the very next token:
+
+![sampling](assets/sampling.png)
+
 ## 📊 Results
 
 The demo model (~10.6M parameters) is trained on the [tiny Shakespeare]
