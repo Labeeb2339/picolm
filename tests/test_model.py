@@ -63,3 +63,22 @@ def test_save_load_roundtrip(tmp_path):
         a, _ = model(idx)
         b, _ = loaded(idx)
     assert torch.allclose(a, b, atol=1e-6)
+
+
+def test_causal_masking():
+    """Perturbing future tokens must not change past-token logits."""
+    model = make_model().eval()
+    idx = torch.randint(0, 65, (1, 16))
+    with torch.no_grad():
+        logits_a, _ = model(idx)
+
+    # Corrupt the last two positions (future relative to positions 0..13).
+    idx2 = idx.clone()
+    idx2[0, -1] = (idx2[0, -1] + 1) % 65
+    idx2[0, -2] = (idx2[0, -2] + 2) % 65
+    with torch.no_grad():
+        logits_b, _ = model(idx2)
+
+    # Positions 0..13 must be identical; only 14..15 may change.
+    assert torch.allclose(logits_a[0, :14], logits_b[0, :14], atol=1e-6)
+    assert not torch.allclose(logits_a[0, -1], logits_b[0, -1])

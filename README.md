@@ -29,6 +29,7 @@ be read and understood.
 | **Training** | Mixed-precision (bfloat16) loop with AdamW, cosine LR + warmup, gradient clipping, checkpointing |
 | **Inference** | KV-cache decoder that reuses past key/value states, plus top-k / top-p sampling |
 | **Quantization** | Symmetric per-tensor int8 weight quantization (~4× smaller) |
+| **Evaluation** | Perplexity vs unigram/bigram baselines, decode-speed + quantization benchmarks |
 
 ## 🚀 Quickstart
 
@@ -49,7 +50,11 @@ python -m picolm train --max-iters 6000
 # 3. Generate
 python -m picolm generate --ckpt out/ckpt.pt --prompt "To be, or not to be"
 
-# 4. Play with it
+# 4. Evaluate (perplexity vs baselines) and benchmark (speed + quantization)
+python -m picolm eval --ckpt out/ckpt.pt --text data/input.txt
+python -m picolm benchmark --ckpt out/ckpt.pt --text data/input.txt
+
+# 5. Play with it
 picolm demo
 ```
 
@@ -93,6 +98,23 @@ checkpoint with the lowest validation loss, not the last iteration.
 **Best validation loss: 1.52** (cross-entropy, reached at step 1,250)
 
 ![training loss curve](assets/loss.png)
+
+**Perplexity vs baselines** (held-out, 111,540 tokens):
+
+| Model | Perplexity |
+|---|---|
+| Unigram baseline | 28.43 |
+| Bigram baseline | 11.96 |
+| **PicoLM** | **4.56** (2.62× better than bigram) |
+
+**Quantization** (symmetric per-tensor int8): 4.0× smaller (43 → 10.7 MB) with
+perplexity change −0.07% (essentially free).
+
+**Decode speed**: KV-cache decoder 179 tok/s vs 148 tok/s eager at 200 tokens.
+The measured 1.21× understates the asymptotic win (O(T²) vs O(T³) attention) —
+see the model card for the full analysis.
+
+📄 **Full methodology, limitations, and reproducibility: [MODEL_CARD.md](MODEL_CARD.md)**
 
 **Sample output** (temperature 0.8, top-k 40):
 
@@ -149,12 +171,15 @@ picolm/
 ├── src/picolm/
 │   ├── tokenizer.py     # char + byte-level BPE tokenizers
 │   ├── model.py         # GPT transformer (attention, MLP, blocks)
-│   ├── training.py      # mixed-precision training loop
+│   ├── training.py      # mixed-precision training loop + early stopping
 │   ├── inference.py     # KV-cache, sampling, int8 quantization
+│   ├── eval.py          # perplexity + unigram/bigram baselines
+│   ├── benchmark.py     # decode-speed + quantization benchmarks
 │   ├── cli.py           # command-line interface
 │   └── demo.py          # Streamlit demo
+├── MODEL_CARD.md        # full methodology, results, limitations
 ├── scripts/             # no-install entry points + plotting
-├── tests/               # pytest suite (15 tests)
+├── tests/               # pytest suite (18 tests)
 └── .github/workflows/   # CI
 ```
 
@@ -162,7 +187,7 @@ picolm/
 
 ```bash
 pip install -e ".[dev]"
-pytest          # 15 tests: tokenizer round-trips, causality, KV-cache == eager, quantization
+pytest          # 18 tests: tokenizer round-trips, causality, KV-cache == eager, baselines, quantization
 ```
 
 ## 📄 License & attribution

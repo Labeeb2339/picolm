@@ -60,6 +60,16 @@ def _build_parser() -> argparse.ArgumentParser:
     g.add_argument("--seed", type=int, default=None)
     g.add_argument("--num-samples", type=int, default=1)
 
+    e = sub.add_parser("eval", help="evaluate perplexity vs baselines")
+    e.add_argument("--ckpt", required=True)
+    e.add_argument("--text", default="data/input.txt")
+    e.add_argument("--num-batches", type=int, default=100)
+
+    b = sub.add_parser("benchmark", help="benchmark KV-cache speed + quantization")
+    b.add_argument("--ckpt", required=True)
+    b.add_argument("--text", default="data/input.txt")
+    b.add_argument("--max-tokens", type=int, default=200)
+
     sub.add_parser("demo", help="launch the Streamlit demo")
     return p
 
@@ -140,6 +150,51 @@ def _cmd_generate(args) -> int:
     return 0
 
 
+def _cmd_eval(args) -> int:
+    from picolm.eval import evaluate
+
+    ckpt = Path(args.ckpt)
+    model = GPT.load(str(ckpt))
+    device = _pick_device(None)
+    model.to(device)
+    tok = _load_tokenizer(ckpt.parent)
+    text = Path(args.text).read_text(encoding="utf-8")
+
+    report = evaluate(
+        model, tok, text, torch.device(device), num_batches=args.num_batches
+    )
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+def _cmd_benchmark(args) -> int:
+    import torch as _t
+
+    from picolm.benchmark import benchmark_generation, quantization_impact
+
+    ckpt = Path(args.ckpt)
+    model = GPT.load(str(ckpt))
+    device = _pick_device(None)
+    model.to(device)
+    tok = _load_tokenizer(ckpt.parent)
+    text = Path(args.text).read_text(encoding="utf-8")
+
+    ids = _t.tensor(tok.encode(text), dtype=_t.long)
+    n = int(0.9 * len(ids))
+    val_data = ids[n:]
+    block_size = model.config.block_size
+
+    idx = _t.tensor([tok.encode("To be") or [0]], dtype=_t.long, device=device)
+    gen = benchmark_generation(model, idx, args.max_tokens)
+    quant = quantization_impact(
+        model, val_data, block_size, 64, torch.device(device), num_batches=40
+    )
+
+    out = {"generation": gen, "quantization": quant}
+    print(json.dumps(out, indent=2))
+    return 0
+
+
 def _cmd_demo(_args) -> int:
     import picolm
 
@@ -155,6 +210,10 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_train(args)
     if args.cmd == "generate":
         return _cmd_generate(args)
+    if args.cmd == "eval":
+        return _cmd_eval(args)
+    if args.cmd == "benchmark":
+        return _cmd_benchmark(args)
     if args.cmd == "demo":
         return _cmd_demo(args)
     return 1
