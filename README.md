@@ -4,7 +4,7 @@
 
 **A GPT-style language model built from scratch in PyTorch.**
 
-*Hand-written tokenizers (char + byte-pair BPE) · causal transformer · mixed-precision GPU training · KV-cache inference engine · int8 quantization — all with zero pretrained weights and zero LLM libraries.*
+*From-scratch tokenizers (char + byte-pair BPE) · causal transformer · mixed-precision GPU training · KV-cache inference engine · int8 quantization — all with zero pretrained weights and zero LLM libraries.*
 
 ![CI](https://github.com/Labeeb2339/picolm/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
