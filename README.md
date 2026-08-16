@@ -20,7 +20,7 @@ implemented from first principles. The goal is to make the entire
 text → tokens → model → tokens → text pipeline transparent, so every line can
 be read and understood.
 
-> Part of a from-scratch ML systems series: [pico-kernels](https://github.com/Labeeb2339/pico-kernels) (Triton kernels) · [pico-diffusion](https://github.com/Labeeb2339/pico-diffusion) (a diffusion model).
+> Part of a from-scratch ML systems series: [pico-kernels](https://github.com/Labeeb2339/pico-kernels) (Triton kernels) · [pico-diffusion](https://github.com/Labeeb2339/pico-diffusion) (a diffusion model) · [pico-engine](https://github.com/Labeeb2339/pico-engine) (a GGUF inference engine).
 
 ## ✨ What's inside
 
