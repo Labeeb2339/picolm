@@ -28,7 +28,7 @@ be read and understood.
 |-----------|------------|
 | **Tokenizers** | Char-level (ships with the demo model) + byte-level BPE (GPT-2 style), both from scratch |
 | **Transformer** | Multi-head causal self-attention, GELU MLP, pre-norm residual blocks, weight tying — plus optional **RoPE** (rotary position embeddings) and **RMSNorm** (LLaMA-style) |
-| **Training** | Mixed-precision (bfloat16) loop with AdamW, cosine LR + warmup, gradient clipping, checkpointing |
+| **Training** | Mixed-precision (bfloat16) loop with AdamW, cosine LR + warmup, gradient clipping, gradient checkpointing, DDP, incremental metrics |
 | **Inference** | KV-cache decoder that reuses past key/value states, plus top-k / top-p sampling |
 | **Quantization** | Symmetric per-tensor int8 weight quantization (~4× smaller) |
 | **Evaluation** | Perplexity vs unigram/bigram baselines, decode-speed + quantization benchmarks, zero-shot HellaSwag |
@@ -196,6 +196,20 @@ clipping, and dropout regularization. Because tiny Shakespeare is small and
 low-entropy, the model can memorize it — so training also performs
 **early stopping**: the checkpoint saved as `ckpt.pt` is always the one with
 the lowest validation loss, not the last iteration.
+
+Three production levers are opt-in:
+
+- **Gradient checkpointing** (`--grad-checkpoint` / `grad_checkpoint=True`) —
+  recomputes block activations in the backward pass: measured **4210 MB → 1206 MB
+  (3.5× less activation memory) at ~1.33× the step time** on a 12-layer / 768-dim
+  config. The standard memory-for-compute tradeoff.
+- **Distributed data parallel** — launch with `torchrun --nproc_per_node=N`;
+  `LOCAL_RANK` triggers the DDP path (rank-0-only saves/logging, per-rank seed).
+  Validated on Linux/NCCL only: Windows torch wheels ship without NCCL and their
+  gloo backend is unstable.
+- **Incremental metrics** — every eval step appends one line to
+  `metrics.jsonl` (step, train/val loss, lr, elapsed), so a crash never loses
+  the loss curve; the full summary still lands in `metrics.json`.
 
 **Inference.** [`picolm/inference.py`](src/picolm/inference.py) adds the
 "serving" half: a KV-cache decoder that hand-unrolls the transformer from the

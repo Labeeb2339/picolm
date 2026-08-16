@@ -27,6 +27,7 @@ class ModelConfig:
     bias: bool = False            # use bias in LayerNorm/linear layers (GPT-2: no)
     rmsnorm: bool = False         # use RMSNorm instead of LayerNorm (LLaMA-style)
     rope: bool = False            # rotary position embeddings instead of learned wpe
+    grad_checkpoint: bool = False # recompute block activations in backward (memory/speed tradeoff)
 
     @property
     def head_size(self) -> int:

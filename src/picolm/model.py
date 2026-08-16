@@ -241,8 +241,12 @@ class GPT(nn.Module):
             pos_emb = self.transformer.wpe(pos)  # (T, C)
             x = self.transformer.drop(tok_emb + pos_emb)
 
-        for block in self.transformer.h:
-            x = block(x)
+        if self.config.grad_checkpoint and self.training:
+            for block in self.transformer.h:
+                x = torch.utils.checkpoint.checkpoint(block, x, use_reentrant=False)
+        else:
+            for block in self.transformer.h:
+                x = block(x)
 
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x)  # (B, T, vocab_size)

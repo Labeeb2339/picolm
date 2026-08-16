@@ -48,6 +48,7 @@ def _build_parser() -> argparse.ArgumentParser:
     t.add_argument("--block-size", type=int, default=None)
     t.add_argument("--dropout", type=float, default=None)
     t.add_argument("--seed", type=int, default=42)
+    t.add_argument("--grad-checkpoint", action="store_true", help="recompute block activations in backward (less memory, more compute)")
 
     g = sub.add_parser("generate", help="generate text from a checkpoint")
     g.add_argument("--ckpt", required=True)
@@ -115,6 +116,7 @@ def _cmd_train(args) -> int:
         batch_size=args.batch_size,
         learning_rate=args.lr,
         seed=args.seed,
+        grad_checkpoint=args.grad_checkpoint,
     )
     return 0
 

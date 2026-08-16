@@ -1,13 +1,17 @@
 """Training loop: data prep, gradient updates, evaluation, checkpointing.
 
-Supports single-GPU training with automatic mixed precision (bfloat16) and a
-cosine learning-rate schedule with warmup — the standard recipe that makes
-small GPTs converge quickly on a consumer GPU.
+Supports single-GPU training with automatic mixed precision (bfloat16), a
+cosine learning-rate schedule with warmup, gradient checkpointing (recompute
+activations in the backward pass to trade compute for memory), distributed
+data-parallel training via ``torchrun``, and incremental metrics logging that
+survives a crash.
 """
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import time
 from pathlib import Path
 
@@ -82,19 +86,44 @@ def train(
     betas: tuple[float, float] = (0.9, 0.95),
     grad_clip: float = 1.0,
     seed: int = 42,
+    grad_checkpoint: bool = False,
 ) -> dict:
     """Train a GPT from scratch on ``text`` and return a metrics summary.
 
-    Returns a dict with the loss curves, final model path, and sample outputs.
+    ``grad_checkpoint`` recomputes block activations in the backward pass,
+    trading ~33% more compute for a ~3.5× reduction in activation memory — the
+    lever that lets a small GPU fit a much deeper model. Launch distributed
+    runs with ``torchrun --nproc_per_node=N``; ``LOCAL_RANK`` triggers the DDP
+    path automatically. DDP is validated on Linux/multi-GPU (NCCL) only:
+    Windows torch wheels ship without NCCL and their gloo backend is unstable,
+    so the distributed path cannot run on this box.
     """
     torch.manual_seed(seed)
-    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-    dtype = "bfloat16" if device == "cuda" else "float32"
-    use_amp = device == "cuda"
+    ddp = int(os.environ.get("LOCAL_RANK", "-1")) != -1
+    local_rank = 0
+    if ddp:
+        import torch.distributed as dist
+
+        # Windows torch wheels ship without NCCL, and their TCPStore has no
+        # libuv — fall back to gloo and disable libuv there.
+        backend = "nccl" if dist.is_nccl_available() else "gloo"
+        os.environ.setdefault("USE_LIBUV", "0")
+        dist.init_process_group(backend=backend)
+        local_rank = int(os.environ["LOCAL_RANK"])
+        torch.cuda.set_device(local_rank)
+        torch.manual_seed(seed + local_rank)  # ranks diverge on data
+        device = f"cuda:{local_rank}"
+    else:
+        device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     dev = torch.device(device)
+    is_cuda = dev.type == "cuda"
+    is_rank0 = local_rank == 0
+    dtype = "bfloat16" if is_cuda else "float32"
+    use_amp = is_cuda
 
     out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    if is_rank0:
+        out_dir.mkdir(parents=True, exist_ok=True)
 
     # --- tokenize ----------------------------------------------------------
     if tokenizer_type == "bpe":
@@ -103,21 +132,33 @@ def train(
     else:
         tok = CharTokenizer.fit(text)
     config.vocab_size = tok.vocab_size
+    config.grad_checkpoint = grad_checkpoint
 
     ids = torch.tensor(tok.encode(text), dtype=torch.long)
     n = int(0.9 * len(ids))
     train_data = ids[:n]
     val_data = ids[n:]
 
-    print(
-        f"[picolm] vocab={tok.vocab_size} tokens={len(ids)} "
-        f"train={len(train_data)} val={len(val_data)} device={device} ({dtype})"
-    )
+    if is_rank0:
+        print(
+            f"[picolm] vocab={tok.vocab_size} tokens={len(ids)} "
+            f"train={len(train_data)} val={len(val_data)} device={device} ({dtype}) "
+            f"grad_checkpoint={grad_checkpoint} ddp={ddp}"
+        )
 
-    model = GPT(config).to(dev)
-    print(f"[picolm] parameters: {model.get_num_params():,}")
+    raw_model = GPT(config).to(dev)
+    n_params = raw_model.get_num_params()
+    model = raw_model
+    if ddp:
+        from torch.nn.parallel import DistributedDataParallel as DDP
 
-    optimizer = model.configure_optimizers(weight_decay, learning_rate, betas)
+        model = DDP(raw_model, device_ids=[local_rank])
+    if is_rank0:
+        print(f"[picolm] parameters: {n_params:,}")
+
+    # Custom GPT methods (configure_optimizers/save/generate) live on the raw
+    # module; DDP only wraps the forward/backward path.
+    optimizer = raw_model.configure_optimizers(weight_decay, learning_rate, betas)
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp) if use_amp else None
 
     train_losses: list[float] = []
@@ -137,24 +178,36 @@ def train(
                 batch_size, eval_iters, dev,
             )
             elapsed = time.time() - t0
-            print(
-                f"step {it:5d}/{max_iters} | train loss {losses['train']:.4f} | "
-                f"val loss {losses['val']:.4f} | lr {lr:.2e} | {elapsed:.1f}s"
-            )
+            if is_rank0:
+                print(
+                    f"step {it:5d}/{max_iters} | train loss {losses['train']:.4f} | "
+                    f"val loss {losses['val']:.4f} | lr {lr:.2e} | {elapsed:.1f}s"
+                )
+                # Incremental, crash-safe metrics: append one line per eval.
+                with open(out_dir / "metrics.jsonl", "a") as f:
+                    f.write(json.dumps({
+                        "step": it,
+                        "train_loss": round(losses["train"], 4),
+                        "val_loss": round(losses["val"], 4),
+                        "lr": lr,
+                        "elapsed_s": round(elapsed, 1),
+                    }) + "\n")
             train_losses.append(losses["train"])
             val_losses.append(losses["val"])
 
             # Early stopping: keep the best-by-validation-loss checkpoint.
             if losses["val"] < best_val:
                 best_val = losses["val"]
-                model.save(str(out_dir / "ckpt.pt"))
-                tok.save(out_dir / "tokenizer.json")
+                if is_rank0:
+                    raw_model.save(str(out_dir / "ckpt.pt"))
+                    tok.save(out_dir / "tokenizer.json")
 
             # Generate a short sample to watch the model improve.
-            ctx = torch.zeros((1, 1), dtype=torch.long, device=dev)
-            with torch.inference_mode():
-                gen = model.generate(ctx, max_new_tokens=120, temperature=0.8, top_k=40)
-            samples.append({"step": it, "text": tok.decode(gen[0].tolist())})
+            if is_rank0:
+                ctx = torch.zeros((1, 1), dtype=torch.long, device=dev)
+                with torch.inference_mode():
+                    gen = raw_model.generate(ctx, max_new_tokens=120, temperature=0.8, top_k=40)
+                samples.append({"step": it, "text": tok.decode(gen[0].tolist())})
 
         # one training step
         xb, yb = get_batch(train_data, config.block_size, batch_size, dev)
@@ -174,46 +227,54 @@ def train(
             torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             optimizer.step()
 
+    if ddp:
+        torch.distributed.barrier()
+
     elapsed = time.time() - t0
     final_losses = estimate_loss(
         model, train_data, val_data, config.block_size, batch_size, eval_iters, dev
     )
 
     # --- save artifacts ----------------------------------------------------
-    # The final iteration may beat every mid-training checkpoint; check once
-    # more so ``ckpt.pt`` is always the best-by-val-loss model.
-    if final_losses["val"] < best_val:
-        best_val = final_losses["val"]
-        model.save(str(out_dir / "ckpt.pt"))
-        tok.save(out_dir / "tokenizer.json")
-    model_path = out_dir / "ckpt.pt"
-    # Also keep the very last weights for reference / continued training.
-    model.save(str(out_dir / "final.pt"))
-    import json
+    if is_rank0:
+        # The final iteration may beat every mid-training checkpoint; check once
+        # more so ``ckpt.pt`` is always the best-by-val-loss model.
+        if final_losses["val"] < best_val:
+            best_val = final_losses["val"]
+            raw_model.save(str(out_dir / "ckpt.pt"))
+            tok.save(out_dir / "tokenizer.json")
+        model_path = out_dir / "ckpt.pt"
+        # Also keep the very last weights for reference / continued training.
+        raw_model.save(str(out_dir / "final.pt"))
 
-    metrics = {
-        "model": config.__dict__,
-        "tokenizer": tokenizer_type,
-        "device": device,
-        "dtype": dtype,
-        "max_iters": max_iters,
-        "eval_interval": eval_interval,
-        "batch_size": batch_size,
-        "learning_rate": learning_rate,
-        "final_train_loss": final_losses["train"],
-        "final_val_loss": final_losses["val"],
-        "best_val_loss": best_val,
-        "train_loss": train_losses,
-        "val_loss": val_losses,
-        "samples": samples,
-        "params": model.get_num_params(),
-        "elapsed_seconds": round(elapsed, 1),
-        "model_path": str(model_path),
-    }
-    (out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
+        metrics = {
+            "model": config.__dict__,
+            "tokenizer": tokenizer_type,
+            "device": device,
+            "dtype": dtype,
+            "ddp": ddp,
+            "world_size": torch.distributed.get_world_size() if ddp else 1,
+            "grad_checkpoint": grad_checkpoint,
+            "max_iters": max_iters,
+            "eval_interval": eval_interval,
+            "batch_size": batch_size,
+            "learning_rate": learning_rate,
+            "final_train_loss": final_losses["train"],
+            "final_val_loss": final_losses["val"],
+            "best_val_loss": best_val,
+            "train_loss": train_losses,
+            "val_loss": val_losses,
+            "samples": samples,
+            "params": n_params,
+            "elapsed_seconds": round(elapsed, 1),
+            "model_path": str(model_path),
+        }
+        (out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
 
-    print(
-        f"[picolm] done in {elapsed:.1f}s | final train {final_losses['train']:.4f} "
-        f"val {final_losses['val']:.4f} | model -> {model_path}"
-    )
+        print(
+            f"[picolm] done in {elapsed:.1f}s | final train {final_losses['train']:.4f} "
+            f"val {final_losses['val']:.4f} | model -> {model_path}"
+        )
+    else:
+        metrics = {}
     return metrics
