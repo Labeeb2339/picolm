@@ -25,11 +25,11 @@ be read and understood.
 | Component | What it is |
 |-----------|------------|
 | **Tokenizers** | Char-level (ships with the demo model) + byte-level BPE (GPT-2 style), both from scratch |
-| **Transformer** | Multi-head causal self-attention, GELU MLP, pre-norm residual blocks, weight tying |
+| **Transformer** | Multi-head causal self-attention, GELU MLP, pre-norm residual blocks, weight tying — plus optional **RoPE** (rotary position embeddings) and **RMSNorm** (LLaMA-style) |
 | **Training** | Mixed-precision (bfloat16) loop with AdamW, cosine LR + warmup, gradient clipping, checkpointing |
 | **Inference** | KV-cache decoder that reuses past key/value states, plus top-k / top-p sampling |
 | **Quantization** | Symmetric per-tensor int8 weight quantization (~4× smaller) |
-| **Evaluation** | Perplexity vs unigram/bigram baselines, decode-speed + quantization benchmarks |
+| **Evaluation** | Perplexity vs unigram/bigram baselines, decode-speed + quantization benchmarks, zero-shot HellaSwag |
 
 ## 🚀 Quickstart
 
@@ -142,6 +142,13 @@ perplexity change −0.07% (essentially free).
 The measured 1.21× understates the asymptotic win (O(T²) vs O(T³) attention) —
 see the model card for the full analysis.
 
+**Zero-shot HellaSwag** (commonsense multiple-choice, chance = 25%): **25.0%**
+(499/2000). This is the expected, honest result — HellaSwag measures general
+English commonsense, which requires web-scale pretraining; the demo model is
+trained on 1.1 MB of Shakespeare with a 65-character vocabulary, so it scores at
+chance. The harness (`picolm/hellaswag.py`) is correct and ready to run on a
+larger general-English model.
+
 📄 **Full methodology, limitations, and reproducibility: [MODEL_CARD.md](MODEL_CARD.md)**
 
 **Sample output** (temperature 0.8, top-k 40):
@@ -204,12 +211,13 @@ picolm/
 │   ├── training.py      # mixed-precision training loop + early stopping
 │   ├── inference.py     # KV-cache, sampling, int8 quantization
 │   ├── eval.py          # perplexity + unigram/bigram baselines
+│   ├── hellaswag.py     # zero-shot HellaSwag (commonsense) eval
 │   ├── benchmark.py     # decode-speed + quantization benchmarks
 │   ├── cli.py           # command-line interface
 │   └── demo.py          # Streamlit demo
 ├── MODEL_CARD.md        # full methodology, results, limitations
 ├── scripts/             # no-install entry points + plotting
-├── tests/               # pytest suite (19 tests)
+├── tests/               # pytest suite (30 tests)
 └── .github/workflows/   # CI
 ```
 
@@ -217,7 +225,7 @@ picolm/
 
 ```bash
 pip install -e ".[dev]"
-pytest          # 19 tests: tokenizer round-trips, causality, KV-cache == eager, baselines, quantization, attention maps
+pytest          # 30 tests: tokenizer round-trips, causality, KV-cache == eager, baselines, quantization, attention maps, RoPE/RMSNorm, HellaSwag
 ```
 
 ## 📄 License & attribution
