@@ -147,9 +147,10 @@ checkpoint with the lowest validation loss, not the last iteration.
 including the fp32 normalization vectors) with
 perplexity change −0.023% on the exact same seeded validation windows.
 
-**Decode speed**: KV caching avoids recomputing earlier keys and values, but on
-this tiny model synchronized 200-token timings varied from parity to a 1.54×
-speedup. Treat it as a mechanism demo, not a guaranteed throughput claim.
+**Decode speed**: KV caching avoids recomputing earlier keys and values. Earlier
+synchronized 200-token runs ranged from parity to 1.54×; the clean
+`148a0d2` receipt measured **1.61×** (308.3 eager vs 495.9 cached tokens/s).
+The spread is why this remains a mechanism demo, not a throughput guarantee.
 
 **Zero-shot HellaSwag** (commonsense multiple-choice, chance = 25%): **25.0%**
 (499/2000). The result is consistent with chance — HellaSwag measures general
@@ -162,6 +163,8 @@ larger general-English model.
 
 🔎 **Exact artifact hashes, environment, commands, and verification receipts:
 [REPRODUCIBILITY.md](REPRODUCIBILITY.md)**
+
+🧾 **Clean RTX 5070 run:** [receipt and checksummed logs](out/evidence/20260822-235049/)
 
 **Sample output** (temperature 0.8, top-k 40):
 

@@ -149,6 +149,11 @@ Absolute repository and user-profile prefixes are replaced with `<repo>` and
 `<home>` as output is captured so a published bundle does not disclose the
 machine's local paths.
 
+The published reference bundle at
+[`out/evidence/20260822-235049/`](out/evidence/20260822-235049/) binds the full
+run to clean source commit `148a0d28724c505790a8e79c85d61a8c06932f45` and
+includes every captured log, `receipt.json`, and their SHA-256 checksums.
+
 Deterministic perplexity and baselines (100 seeded validation batches):
 
 ```powershell
