@@ -149,6 +149,11 @@ Absolute repository and user-profile prefixes are replaced with `<repo>` and
 `<home>` as output is captured so a published bundle does not disclose the
 machine's local paths.
 
+Receipt schema v2 hashes canonical Git-index blobs for tracked source files and
+raw bytes for untracked files. This keeps the source fingerprint stable across
+Git checkout line-ending filters while the recorded clean/dirty state and patch
+hashes still expose any source changes outside the index.
+
 The published reference bundle at
 [`out/evidence/20260822-235049/`](out/evidence/20260822-235049/) binds the full
 run to clean source commit `148a0d28724c505790a8e79c85d61a8c06932f45` and

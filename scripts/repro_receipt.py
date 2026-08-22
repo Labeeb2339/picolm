@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Emit a reproducibility receipt without leaking machine-specific paths.
 
-The receipt binds a run to the Git base commit, the exact visible source tree,
-the tracked patch, package versions, hardware, and any reference artifacts that
-are present. Generated receipt JSON files under ``reproducibility/receipts`` are
-excluded from the source fingerprint to avoid a self-referential hash.
+The receipt binds a run to the Git base commit, canonical Git-index blobs plus
+untracked source files, the tracked patch, package versions, hardware, and any
+reference artifacts that are present. Using Git blobs for tracked files avoids
+platform checkout filters (for example CRLF conversion) changing the source
+fingerprint. Generated receipt JSON files under ``reproducibility/receipts`` are
+excluded to avoid a self-referential hash.
 """
 
 from __future__ import annotations
@@ -74,23 +76,36 @@ def safe_remote(url: str) -> str:
 
 
 def source_manifest() -> tuple[list[dict], str]:
-    raw = git_bytes("ls-files", "--cached", "--others", "--exclude-standard", "-z")
-    paths = sorted(p.decode("utf-8") for p in raw.split(b"\0") if p)
+    tracked_raw = git_bytes("ls-files", "--cached", "-z")
+    untracked_raw = git_bytes("ls-files", "--others", "--exclude-standard", "-z")
+    tracked_paths = {path.decode("utf-8") for path in tracked_raw.split(b"\0") if path}
+    untracked_paths = {
+        path.decode("utf-8") for path in untracked_raw.split(b"\0") if path
+    }
     entries: list[dict] = []
     aggregate = hashlib.sha256()
-    for relative in paths:
+    for relative in sorted(tracked_paths | untracked_paths):
         normalized = relative.replace("\\", "/")
-        if normalized.startswith("reproducibility/receipts/") and normalized.endswith(
-            ".json"
+        if normalized.startswith("out/evidence/") or (
+            normalized.startswith("reproducibility/receipts/")
+            and normalized.endswith(".json")
         ):
             continue
-        path = ROOT / relative
-        if not path.is_file():
-            continue
-        digest = sha256_file(path)
-        size = path.stat().st_size
-        entries.append({"path": normalized, "bytes": size, "sha256": digest})
-        aggregate.update(f"{normalized}\0{size}\0{digest}\n".encode())
+        if relative in tracked_paths:
+            data = git_bytes("show", f":{normalized}")
+            basis = "git-index-blob"
+        else:
+            path = ROOT / relative
+            if not path.is_file():
+                continue
+            data = path.read_bytes()
+            basis = "untracked-worktree-file"
+        digest = sha256_bytes(data)
+        size = len(data)
+        entries.append(
+            {"path": normalized, "basis": basis, "bytes": size, "sha256": digest}
+        )
+        aggregate.update(f"{normalized}\0{basis}\0{size}\0{digest}\n".encode())
     return entries, aggregate.hexdigest()
 
 
@@ -174,7 +189,7 @@ def build_receipt() -> dict:
     artifacts, artifacts_match = artifact_evidence()
     origin = git_text("remote", "get-url", "origin")
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "project": "PicoLM",
         "git": {

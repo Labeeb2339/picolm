@@ -12,3 +12,5 @@ Generated JSON receipts are ignored by Git because they describe one local
 worktree and machine. Share one alongside benchmark output when another
 engineer needs to audit a particular run. The committed
 `reproducibility/artifacts.json` is the stable reference-artifact manifest.
+Schema v2 hashes tracked files from their canonical Git-index blobs, avoiding
+platform-specific CRLF checkout differences in source verification.
