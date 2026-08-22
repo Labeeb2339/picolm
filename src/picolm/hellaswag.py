@@ -18,7 +18,7 @@ reports what the model can actually do.
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 import torch
 import torch.nn.functional as F
@@ -41,7 +41,11 @@ def safe_encode(tokenizer, text: str) -> list[int]:
 
 @torch.no_grad()
 def score_completion(
-    model, ctx_tokens: list[int], end_tokens: list[int], block_size: int, device: torch.device
+    model,
+    ctx_tokens: list[int],
+    end_tokens: list[int],
+    block_size: int,
+    device: torch.device,
 ) -> float:
     """Average negative log-likelihood of ``end_tokens`` given ``ctx_tokens``.
 
@@ -82,7 +86,9 @@ def evaluate_hellaswag(
             break
         ctx_tokens = safe_encode(tokenizer, ex["ctx"])
         scores = [
-            score_completion(model, ctx_tokens, safe_encode(tokenizer, e), block_size, device)
+            score_completion(
+                model, ctx_tokens, safe_encode(tokenizer, e), block_size, device
+            )
             for e in ex["endings"]
         ]
         pred = scores.index(min(scores))

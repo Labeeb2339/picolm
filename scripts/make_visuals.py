@@ -18,9 +18,9 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from picolm.cli import _load_tokenizer  # noqa: E402
-from picolm.inference import quantize_int8  # noqa: E402
-from picolm.model import GPT  # noqa: E402
+from picolm.cli import _load_tokenizer
+from picolm.inference import quantize_int8
+from picolm.model import GPT
 
 BLUE = "#3b82f6"
 ORANGE = "#f59e0b"
@@ -81,8 +81,7 @@ def main() -> None:
 
     fig, ax = plt.subplots(figsize=(7.5, 3.6))
     ax.hist(w.ravel(), bins=120, alpha=0.55, label="float32", color=BLUE)
-    ax.hist(deq.ravel(), bins=120, alpha=0.85, label="int8 (dequantized)",
-            color=ORANGE)
+    ax.hist(deq.ravel(), bins=120, alpha=0.85, label="int8 (dequantized)", color=ORANGE)
     ax.set_xlabel("weight value")
     ax.set_ylabel("count")
     ax.set_title("int8 quantization: continuous weights snap to discrete buckets")

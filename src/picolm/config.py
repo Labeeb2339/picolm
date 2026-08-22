@@ -7,7 +7,7 @@ GPT-2-scale architectures (given the compute).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -18,16 +18,18 @@ class ModelConfig:
     paper's notation (``n_layer``, ``n_head``, ``n_embd``).
     """
 
-    vocab_size: int = 65          # number of tokens in the vocabulary
-    block_size: int = 256         # maximum context length (T)
-    n_layer: int = 6              # transformer blocks
-    n_head: int = 6               # attention heads (must divide n_embd)
-    n_embd: int = 384             # embedding / residual dimension
-    dropout: float = 0.0          # dropout probability (0 for inference)
-    bias: bool = False            # use bias in LayerNorm/linear layers (GPT-2: no)
-    rmsnorm: bool = False         # use RMSNorm instead of LayerNorm (LLaMA-style)
-    rope: bool = False            # rotary position embeddings instead of learned wpe
-    grad_checkpoint: bool = False # recompute block activations in backward (memory/speed tradeoff)
+    vocab_size: int = 65  # number of tokens in the vocabulary
+    block_size: int = 256  # maximum context length (T)
+    n_layer: int = 6  # transformer blocks
+    n_head: int = 6  # attention heads (must divide n_embd)
+    n_embd: int = 384  # embedding / residual dimension
+    dropout: float = 0.0  # dropout probability (0 for inference)
+    bias: bool = False  # use bias in LayerNorm/linear layers (GPT-2: no)
+    rmsnorm: bool = False  # use RMSNorm instead of LayerNorm (LLaMA-style)
+    rope: bool = False  # rotary position embeddings instead of learned wpe
+    grad_checkpoint: bool = (
+        False  # recompute block activations in backward (memory/speed tradeoff)
+    )
 
     @property
     def head_size(self) -> int:

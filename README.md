@@ -7,9 +7,8 @@
 *From-scratch tokenizers (char + byte-pair BPE) · causal transformer · mixed-precision GPU training · KV-cache inference engine · int8 quantization — all with zero pretrained weights and zero LLM libraries.*
 
 ![CI](https://github.com/Labeeb2339/picolm/actions/workflows/ci.yml/badge.svg)
-![Python](https://img.shields.io/badge/python-3.9%2B-blue)
-![PyTorch](https://img.shields.io/badge/pytorch-2.x-ee4c2c)
-![License](https://img.shields.io/badge/license-MIT-green)
+![Python](https://img.shields.io/badge/python-3.11-blue)
+![PyTorch](https://img.shields.io/badge/pytorch-2.5%2B-ee4c2c)
 
 </div>
 
@@ -42,12 +41,12 @@ cd picolm
 # 1. Create a venv and install (CUDA 12.8 wheel for NVIDIA GPUs)
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install torch --index-url https://download.pytorch.org/whl/cu128
+pip install "torch>=2.5" --index-url https://download.pytorch.org/whl/cu128
 pip install -e ".[demo]"
 
-# 2. Train (downloads tiny Shakespeare automatically on first run)
+# 2. Train the reference configuration
 python scripts/download_data.py
-python -m picolm train --max-iters 6000
+python -m picolm train --max-iters 2000 --eval-interval 250 --eval-iters 40 --batch-size 64 --seed 42
 
 # 3. Generate
 python -m picolm generate --ckpt out/ckpt.pt --prompt "To be, or not to be"
@@ -92,10 +91,15 @@ picolm demo
 
 ## 🖥️ Dashboard
 
-`picolm demo` launches an interactive visualization dashboard with five views:
+`picolm demo` launches an interactive visualization dashboard with six lazy-loaded views:
+
+On the prepared Windows machine, the one-command meeting launcher is
+`powershell -ExecutionPolicy Bypass -File .\Start-Dashboard.ps1`. It binds to
+`127.0.0.1` so the local checkpoint dashboard is not exposed to the network.
 
 | View | What it shows |
 |---|---|
+| **Overview** | a meeting-friendly system map and three-minute walkthrough |
 | **Generate** | interactive text generation with live sampling knobs |
 | **Attention** | per-layer, per-head attention maps — the causal triangle, visible |
 | **Sampling** | the next-token probability distribution reshaped by temperature/top-k/top-p |
@@ -120,7 +124,9 @@ shape is the causal mask (a token can only attend to itself and the past):
 
 ## 📊 Results
 
-The demo model (~10.6M parameters) is trained on the [tiny Shakespeare]
+The demo model has **10,745,088 total trainable parameters** (10,646,784 when
+learned positional embeddings are excluded, following the nanoGPT reporting
+convention). It is trained on the [tiny Shakespeare]
 corpus (1.1M characters) for 2,000 iterations on a single NVIDIA RTX 5070
 Laptop GPU. Training uses dropout and early stopping: `ckpt.pt` is the
 checkpoint with the lowest validation loss, not the last iteration.
@@ -135,23 +141,27 @@ checkpoint with the lowest validation loss, not the last iteration.
 |---|---|
 | Unigram baseline | 28.43 |
 | Bigram baseline | 11.96 |
-| **PicoLM** | **4.56** (2.62× better than bigram) |
+| **PicoLM** | **4.59** (2.61× better than bigram) |
 
-**Quantization** (symmetric per-tensor int8): 4.0× smaller (43 → 10.7 MB) with
-perplexity change −0.07% (essentially free).
+**Quantization** (symmetric per-tensor int8): 3.99× smaller (42.98 → 10.76 MB,
+including the fp32 normalization vectors) with
+perplexity change −0.023% on the exact same seeded validation windows.
 
-**Decode speed**: KV-cache decoder 179 tok/s vs 148 tok/s eager at 200 tokens.
-The measured 1.21× understates the asymptotic win (O(T²) vs O(T³) attention) —
-see the model card for the full analysis.
+**Decode speed**: KV caching avoids recomputing earlier keys and values, but on
+this tiny model synchronized 200-token timings varied from parity to a 1.54×
+speedup. Treat it as a mechanism demo, not a guaranteed throughput claim.
 
 **Zero-shot HellaSwag** (commonsense multiple-choice, chance = 25%): **25.0%**
-(499/2000). This is the expected, honest result — HellaSwag measures general
+(499/2000). The result is consistent with chance — HellaSwag measures general
 English commonsense, which requires web-scale pretraining; the demo model is
 trained on 1.1 MB of Shakespeare with a 65-character vocabulary, so it scores at
 chance. The harness (`picolm/hellaswag.py`) is correct and ready to run on a
 larger general-English model.
 
 📄 **Full methodology, limitations, and reproducibility: [MODEL_CARD.md](MODEL_CARD.md)**
+
+🔎 **Exact artifact hashes, environment, commands, and verification receipts:
+[REPRODUCIBILITY.md](REPRODUCIBILITY.md)**
 
 **Sample output** (temperature 0.8, top-k 40):
 
@@ -212,10 +222,14 @@ Three production levers are opt-in:
   the loss curve; the full summary still lands in `metrics.json`.
 
 **Inference.** [`picolm/inference.py`](src/picolm/inference.py) adds the
-"serving" half: a KV-cache decoder that hand-unrolls the transformer from the
-raw weights (so attention never recomputes over the full sequence), top-k /
-top-p sampling, and symmetric per-tensor int8 quantization that stores each
-weight matrix as `round(w / scale)` plus a single scale.
+"serving" half: a KV-cache decoder that hand-unrolls the default transformer
+from the raw weights (so attention never recomputes over the full sequence),
+top-k / top-p sampling, and symmetric per-tensor int8 quantization that stores
+each selected matrix as `round(w / scale)` plus a single scale. KV/eager parity
+is tested while prompt plus generation fits inside the learned context window;
+unsupported RoPE/RMSNorm cache use and overlength requests fail explicitly.
+The int8 experiment dequantizes weights for PyTorch evaluation; it is not an
+int8 matrix-multiplication kernel.
 
 ## 🗂️ Project structure
 
@@ -232,8 +246,10 @@ picolm/
 │   ├── cli.py           # command-line interface
 │   └── demo.py          # Streamlit demo
 ├── MODEL_CARD.md        # full methodology, results, limitations
+├── REPRODUCIBILITY.md   # hashes, exact commands, evidence boundaries
+├── reproducibility/     # artifact manifest + environment snapshot
 ├── scripts/             # no-install entry points + plotting
-├── tests/               # pytest suite (30 tests)
+├── tests/               # CPU tests plus GPU-gated Triton parity tests
 └── .github/workflows/   # CI
 ```
 
@@ -241,12 +257,15 @@ picolm/
 
 ```bash
 pip install -e ".[dev]"
-pytest          # 30 tests: tokenizer round-trips, causality, KV-cache == eager, baselines, quantization, attention maps, RoPE/RMSNorm, HellaSwag
+pytest          # tokenizers, causality, in-context KV/eager parity, baselines,
+                # quantization, attention maps, RoPE/RMSNorm, and HellaSwag
 ```
 
-## 📄 License & attribution
+## 📄 Attribution
 
-MIT © 2026 Muhammad Labeeb Aryan Bin Mohd Lokman. Training corpus is
+Copyright © 2026 Muhammad Labeeb Aryan Bin Mohd Lokman. No repository license
+has been selected yet; add one only after the owner makes that legal choice.
+The training corpus is
 [tiny Shakespeare], collected by Andrej Karpathy. Architecture follows the
 GPT-2 paper ([Radford et al., 2019](https://d4mucfpksywv.cloudfront.net/better-language-models/language-models-are-unsupervised-multitask-learners.pdf)).
 

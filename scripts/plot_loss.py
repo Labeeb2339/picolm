@@ -39,7 +39,7 @@ def main() -> None:
     plt.xlabel("step")
     plt.ylabel("cross-entropy loss")
     plt.title(
-        f"PicoLM training loss — {m['params']:,} params, "
+        f"PicoLM training loss — {m.get('params_total', m['params']):,} params, "
         f"{m['max_iters']:,} iters, {m['device']}"
     )
     plt.legend()

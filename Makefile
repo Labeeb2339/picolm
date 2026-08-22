@@ -1,12 +1,19 @@
-.PHONY: install train generate test demo
+.PHONY: venv install train generate test demo
 
-PY := .venv/Scripts/python
-PIP := .venv/Scripts/pip
+ifeq ($(OS),Windows_NT)
+PY := .venv/Scripts/python.exe
+else
+PY := .venv/bin/python
+endif
 
-install:            ## create venv + install CUDA torch + package
+
+venv:               ## create the local virtual environment
+	python -m venv .venv
+
+install: venv       ## install CUDA 12.8 torch + package into .venv
 	$(PY) -m pip install --upgrade pip
-	$(PIP) install torch --index-url https://download.pytorch.org/whl/cu128
-	$(PIP) install -e ".[dev,demo]"
+	$(PY) -m pip install torch --index-url https://download.pytorch.org/whl/cu128
+	$(PY) -m pip install -e ".[dev,demo]"
 
 train:              ## train the demo model on tiny Shakespeare
 	$(PY) -m picolm train --text data/input.txt --out-dir out --max-iters 5000

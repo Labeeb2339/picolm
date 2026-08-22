@@ -1,5 +1,6 @@
 """Inference tests: sampling, KV-cache correctness, int8 quantization."""
 
+import pytest
 import torch
 
 from picolm.config import ModelConfig
@@ -56,6 +57,40 @@ def test_kv_cache_matches_model_generate():
     assert torch.equal(ref, kv)
 
 
+def test_kv_cache_greedy_prefill_matches_eager():
+    torch.manual_seed(321)
+    model = make_model()
+    idx = torch.randint(0, 65, (1, 12))
+
+    eager = model.generate(idx.clone(), 8, temperature=1.0, top_k=1)
+    cached = generate_kv(model, idx.clone(), 8, temperature=1.0, top_k=1)
+
+    assert torch.equal(eager, cached)
+
+
+def test_kv_cache_rejects_lengths_outside_its_parity_contract():
+    model = make_model()
+    idx = torch.zeros((1, 30), dtype=torch.long)
+    with pytest.raises(ValueError, match="fits inside block_size"):
+        generate_kv(model, idx, 3)
+
+
+def test_kv_cache_rejects_unsupported_modern_configuration():
+    model = GPT(
+        ModelConfig(
+            vocab_size=65,
+            block_size=32,
+            n_layer=1,
+            n_head=2,
+            n_embd=16,
+            rmsnorm=True,
+            rope=True,
+        )
+    ).eval()
+    with pytest.raises(NotImplementedError, match="learned positions"):
+        generate_kv(model, torch.zeros((1, 1), dtype=torch.long), 1)
+
+
 def test_quantization_reduces_size_and_preserves_forward():
     torch.manual_seed(0)
     model = make_model()
@@ -63,6 +98,13 @@ def test_quantization_reduces_size_and_preserves_forward():
     size = model_size_bytes(model, q, scales)
     assert size["int8_bytes"] < size["fp32_bytes"]
     assert size["compression_ratio"] > 3.0
+    expected_int8 = sum(tensor.numel() for tensor in q.values()) + 4 * len(scales)
+    expected_int8 += sum(
+        parameter.numel() * 4
+        for name, parameter in model.named_parameters()
+        if name not in q
+    )
+    assert size["int8_bytes"] == expected_int8
 
     dequantize_int8(model, q, scales)
     idx = torch.randint(0, 65, (1, 8))

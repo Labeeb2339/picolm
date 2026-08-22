@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "project": "PicoLM",
+  "evidence_status": "local reference run; large artifacts are intentionally not committed",
+  "provenance": {
+    "training_commit_recorded_in_metrics": false,
+    "nearest_source_commit": "3854412b809a6e314732e910872a1c83baf48f5e",
+    "nearest_source_commit_time": "2026-08-15T17:58:06+08:00",
+    "metrics_file_time": "2026-08-15T17:55:52+08:00",
+    "interpretation": "The initial commit followed the local run by about two minutes, but the run did not record a Git SHA. Artifact identity is exact; original-training source identity is not cryptographically proven."
+  },
+  "model": {
+    "architecture": "decoder-only transformer with learned absolute positions",
+    "total_trainable_parameters": 10745088,
+    "non_positional_parameters": 10646784,
+    "layers": 6,
+    "heads": 6,
+    "embedding_dimension": 384,
+    "context_length": 256,
+    "vocabulary_size": 65
+  },
+  "artifacts": [
+    {
+      "path": "data/input.txt",
+      "bytes": 1115394,
+      "sha256": "86c4e6aa9db7c042ec79f339dcb96d42b0075e16b8fc2e86bf0ca57e2dc565ed",
+      "role": "tiny Shakespeare training and validation corpus"
+    },
+    {
+      "path": "data/hellaswag_val.jsonl",
+      "bytes": 12246618,
+      "sha256": "0aa3b88843990f3f10a97b9575c94d7b71fb2205240ba04ae4884d9e9c992588",
+      "role": "HellaSwag validation data used for the recorded 2000-example run"
+    },
+    {
+      "path": "out/ckpt.pt",
+      "bytes": 44569731,
+      "sha256": "b364afe8bee62f6612642d16394900b0d6c1944ca545e788514cf13b0d636c5a",
+      "role": "best validation-loss checkpoint"
+    },
+    {
+      "path": "out/final.pt",
+      "bytes": 44569782,
+      "sha256": "242044768d20bcc5c166c4c8bf2a4d50bbe43e23596e5b13011aee13c3203248",
+      "role": "final-iteration checkpoint; not used for headline metrics"
+    },
+    {
+      "path": "out/tokenizer.json",
+      "bytes": 326,
+      "sha256": "65df4ff212da4aee6838ccbd3a1e706d7883e3c96bd5928e9287e550d5cf1e25",
+      "role": "65-character tokenizer paired with the checkpoint"
+    },
+    {
+      "path": "out/metrics.json",
+      "bytes": 2656,
+      "sha256": "9631181c42bd1f5512d7070d988550b9b5eacdb0d2843b45b308a394718ee48f",
+      "role": "training metrics emitted by the reference run"
+    }
+  ],
+  "reported_results": {
+    "best_validation_loss": 1.5180202722549438,
+    "best_checkpoint_step": 1250,
+    "held_out_tokens": 111540,
+    "model_perplexity_100_seeded_batches": 4.59,
+    "bigram_perplexity": 11.96,
+    "unigram_perplexity": 28.43,
+    "int8_storage_compression_ratio": 3.99,
+    "int8_perplexity_delta_percent_same_windows": -0.023,
+    "hellaswag_accuracy_2000_examples": 0.2495,
+    "hellaswag_correct": 499
+  },
+  "claim_boundaries": [
+    "The checkpoint is trained only on tiny Shakespeare and is not a factual or general-purpose language model.",
+    "The int8 result is a weight-storage and dequantized-evaluation experiment, not an int8 execution kernel.",
+    "KV-cache timing is hardware- and run-dependent; local 200-token runs ranged from parity to 1.54x.",
+    "HellaSwag is an out-of-domain harness check and the recorded result is chance-level.",
+    "GPU retraining is seed-controlled but not promised to be bit-identical across PyTorch, CUDA, driver, or GPU versions.",
+    "The original training run predates a Git-SHA receipt; rerun from a clean release commit for end-to-end provenance."
+  ]
+}

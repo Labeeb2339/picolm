@@ -14,7 +14,6 @@ credible.
 from __future__ import annotations
 
 import math
-from pathlib import Path
 
 import torch
 
@@ -29,13 +28,21 @@ def model_perplexity(
     batch_size: int,
     device: torch.device,
     num_batches: int = 100,
+    seed: int = 42,
 ) -> tuple[float, float]:
-    """Return ``(avg_loss, perplexity)`` on ``data`` over ``num_batches``."""
+    """Return a seeded ``(avg_loss, perplexity)`` estimate on ``data``."""
     model.eval()
+    generator = torch.Generator().manual_seed(seed)
     total_loss = 0.0
     total_tokens = 0
     for _ in range(num_batches):
-        x, y = get_batch(data, block_size, batch_size, device)
+        x, y = get_batch(
+            data,
+            block_size,
+            batch_size,
+            device,
+            generator=generator,
+        )
         _, loss = model(x, y)
         total_loss += loss.item() * y.numel()
         total_tokens += y.numel()
@@ -56,7 +63,10 @@ def unigram_baseline(
 
 
 def bigram_baseline(
-    train_data: torch.Tensor, val_data: torch.Tensor, vocab_size: int, alpha: float = 1.0
+    train_data: torch.Tensor,
+    val_data: torch.Tensor,
+    vocab_size: int,
+    alpha: float = 1.0,
 ) -> tuple[float, float]:
     """Perplexity of a character-level bigram model with add-``alpha`` smoothing."""
     import numpy as np
@@ -99,8 +109,8 @@ def evaluate(
     model_avg_loss, model_ppl = model_perplexity(
         model, val_data, block_size, batch_size, device, num_batches
     )
-    uni_loss, uni_ppl = unigram_baseline(train_data, val_data, vocab_size)
-    bi_loss, bi_ppl = bigram_baseline(train_data, val_data, vocab_size)
+    _uni_loss, uni_ppl = unigram_baseline(train_data, val_data, vocab_size)
+    _bi_loss, bi_ppl = bigram_baseline(train_data, val_data, vocab_size)
 
     return {
         "model_loss": round(model_avg_loss, 4),
@@ -109,6 +119,6 @@ def evaluate(
         "bigram_perplexity": round(bi_ppl, 2),
         "bigram_vs_model": round(bi_ppl / model_ppl, 2),
         "unigram_vs_model": round(uni_ppl / model_ppl, 2),
-        "val_tokens": int(len(val_data)),
+        "val_tokens": len(val_data),
         "num_batches": num_batches,
     }

@@ -12,8 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from picolm.config import ModelConfig, PICO_CONFIG  # noqa: E402
-from picolm.training import train  # noqa: E402
+from picolm.config import PICO_CONFIG, ModelConfig
+from picolm.training import train
 
 
 def main() -> None:

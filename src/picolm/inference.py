@@ -81,13 +81,20 @@ def _run_blocks(
         k = k.view(B, T, cfg.n_head, head_size).transpose(1, 2)
         v = v.view(B, T, cfg.n_head, head_size).transpose(1, 2)
 
+        past_length = 0
         if caches[i] is not None:
             pk, pv = caches[i]
+            past_length = pk.size(2)
             k = torch.cat([pk, k], dim=2)
             v = torch.cat([pv, v], dim=2)
         caches[i] = (k, v)
 
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(head_size))
+        if T > 1:
+            query_positions = past_length + torch.arange(T, device=q.device)
+            key_positions = torch.arange(k.size(2), device=q.device)
+            causal = query_positions[:, None] >= key_positions[None, :]
+            att = att.masked_fill(~causal[None, None], float("-inf"))
         att = F.softmax(att, dim=-1)
         y = att @ v
         y = y.transpose(1, 2).contiguous().view(B, T, cfg.n_embd)
@@ -96,8 +103,9 @@ def _run_blocks(
 
         # --- MLP ---
         xn = _layer_norm(x, block.ln_2)
-        h = F.gelu(F.linear(xn, block.mlp.c_fc.weight, block.mlp.c_fc.bias),
-                   approximate="tanh")
+        h = F.gelu(
+            F.linear(xn, block.mlp.c_fc.weight, block.mlp.c_fc.bias), approximate="tanh"
+        )
         h = F.linear(h, block.mlp.c_proj.weight, block.mlp.c_proj.bias)
         x = x + h
 
@@ -115,11 +123,26 @@ def generate_kv(
 ) -> torch.Tensor:
     """Autoregressive generation with a key/value cache.
 
-    Returns ``idx`` extended by ``max_new_tokens`` sampled tokens. Greedy
-    output (temperature→0) matches :meth:`GPT.generate` exactly, which the
-    test-suite verifies.
+    Returns ``idx`` extended by ``max_new_tokens`` sampled tokens. For the
+    learned-position/LayerNorm architecture and while the entire prompt plus
+    generation stays inside ``block_size``, seeded output matches
+    :meth:`GPT.generate` exactly. Unsupported configurations and lengths fail
+    explicitly instead of silently claiming parity.
     """
     cfg = model.config
+    if cfg.rope or cfg.rmsnorm:
+        raise NotImplementedError(
+            "generate_kv currently supports learned positions with LayerNorm only"
+        )
+    if idx.ndim != 2 or idx.size(1) == 0:
+        raise ValueError("idx must have shape (batch, tokens) with at least one token")
+    if max_new_tokens < 0:
+        raise ValueError("max_new_tokens must be non-negative")
+    if idx.size(1) + max_new_tokens > cfg.block_size:
+        raise ValueError(
+            "KV-cache parity is defined only while prompt + generation fits "
+            f"inside block_size={cfg.block_size}"
+        )
     model.eval()
     wte = model.transformer.wte.weight
     wpe = model.transformer.wpe.weight
@@ -138,9 +161,8 @@ def generate_kv(
         idx_next = sample(logits[:, -1, :], temperature, top_k, top_p)
         idx = torch.cat([idx, idx_next], dim=1)
 
-        # Positional index is clamped to the trained context window.
-        p = min(next_pos, cfg.block_size - 1)
-        x = wte[idx_next] + wpe[p:p + 1]
+        p = next_pos
+        x = wte[idx_next] + wpe[p : p + 1]
         next_pos += 1
 
         x = _run_blocks(model, x, caches)
@@ -177,9 +199,11 @@ def dequantize_int8(
     model: GPT, q: dict[str, torch.Tensor], scales: dict[str, float]
 ) -> None:
     """Write the de-quantized float32 weights back into ``model`` in place."""
-    for name, param in model.named_parameters():
-        if name in q:
-            param.data = q[name].float() * scales[name]
+    with torch.no_grad():
+        for name, param in model.named_parameters():
+            if name in q:
+                restored = q[name].to(device=param.device, dtype=param.dtype)
+                param.copy_(restored * scales[name])
 
 
 def model_size_bytes(
@@ -187,12 +211,22 @@ def model_size_bytes(
     q: dict[str, torch.Tensor] | None = None,
     scales: dict[str, float] | None = None,
 ) -> dict[str, int]:
-    """Report parameter memory footprint in bytes (fp32 vs int8)."""
+    """Report fp32 storage vs mixed int8/fp32 parameter storage.
+
+    Matrix weights selected by :func:`quantize_int8` use one byte per value
+    plus one fp32 scale per tensor. Parameters not selected for quantization
+    (for example normalization vectors) remain fp32 and must still be counted.
+    """
     fp32 = sum(p.numel() * 4 for p in model.parameters())
     result = {"fp32_bytes": fp32}
     if q is not None:
         int8 = sum(t.numel() * 1 for t in q.values())
         int8 += sum(4 for _ in scales.values()) if scales else 0
+        int8 += sum(
+            parameter.numel() * 4
+            for name, parameter in model.named_parameters()
+            if name not in q
+        )
         result["int8_bytes"] = int8
         result["compression_ratio"] = round(fp32 / int8, 2)
     return result

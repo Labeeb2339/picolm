@@ -21,7 +21,9 @@ from picolm.cli import _load_tokenizer
 from picolm.hellaswag import evaluate_hellaswag
 from picolm.model import GPT
 
-HELLASWAG_URL = "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_val.jsonl"
+HELLASWAG_URL = (
+    "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_val.jsonl"
+)
 
 
 def load_examples(path: Path) -> list[dict]:
@@ -29,7 +31,9 @@ def load_examples(path: Path) -> list[dict]:
     with open(path, encoding="utf-8") as f:
         for line in f:
             ex = json.loads(line)
-            examples.append({"ctx": ex["ctx"], "endings": ex["endings"], "label": ex["label"]})
+            examples.append(
+                {"ctx": ex["ctx"], "endings": ex["endings"], "label": ex["label"]}
+            )
     return examples
 
 
@@ -38,13 +42,16 @@ def main() -> int:
     ap.add_argument("--ckpt", required=True)
     ap.add_argument("--data", default="data/hellaswag_val.jsonl")
     ap.add_argument("--limit", type=int, default=None, help="max examples to score")
-    ap.add_argument("--download", action="store_true", help="download the val set if missing")
+    ap.add_argument(
+        "--download", action="store_true", help="download the val set if missing"
+    )
     args = ap.parse_args()
 
     data = Path(args.data)
     if args.download and not data.exists():
         import urllib.request
 
+        data.parent.mkdir(parents=True, exist_ok=True)
         print("downloading HellaSwag validation set ...")
         urllib.request.urlretrieve(HELLASWAG_URL, data)
         print(f"  saved {data} ({data.stat().st_size / 1e6:.1f} MB)")
@@ -62,7 +69,9 @@ def main() -> int:
     n = args.limit or len(examples)
     print(f"loaded {len(examples)} examples, scoring {n} on {device} ...")
 
-    result = evaluate_hellaswag(model, tok, examples, torch.device(device), limit=args.limit)
+    result = evaluate_hellaswag(
+        model, tok, examples, torch.device(device), limit=args.limit
+    )
     print(json.dumps(result, indent=2))
     return 0
 

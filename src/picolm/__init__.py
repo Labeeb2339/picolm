@@ -10,14 +10,14 @@ Highlights::
     model = GPT(ModelConfig(vocab_size=65, block_size=256))
 """
 
+from picolm._version import __version__
 from picolm.model import GPT, ModelConfig
 from picolm.tokenizer import BPETokenizer, CharTokenizer
-from picolm._version import __version__
 
 __all__ = [
     "GPT",
-    "ModelConfig",
-    "CharTokenizer",
     "BPETokenizer",
+    "CharTokenizer",
+    "ModelConfig",
     "__version__",
 ]

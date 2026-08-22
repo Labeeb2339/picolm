@@ -14,9 +14,9 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from picolm.cli import _load_tokenizer  # noqa: E402
-from picolm.inference import generate_kv  # noqa: E402
-from picolm.model import GPT  # noqa: E402
+from picolm.cli import _load_tokenizer
+from picolm.inference import generate_kv
+from picolm.model import GPT
 
 
 def main() -> None:
@@ -43,7 +43,9 @@ def main() -> None:
             model, idx, args.max_tokens, args.temperature, args.top_k, args.top_p
         )
     else:
-        out = model.generate(idx, args.max_tokens, args.temperature, args.top_k)
+        out = model.generate(
+            idx, args.max_tokens, args.temperature, args.top_k, args.top_p
+        )
 
     print(tok.decode(out[0].tolist()))
 

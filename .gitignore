@@ -17,6 +17,7 @@ dist/
 # Test / coverage
 .pytest_cache/
 .pytest-tmp/
+reproducibility/receipts/*.json
 .coverage
 htmlcov/
 

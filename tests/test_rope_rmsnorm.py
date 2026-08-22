@@ -30,8 +30,8 @@ def test_rope_translation_invariance():
     cos, sin = precompute_rope(16, 64)
 
     def score(m, n):
-        qm = apply_rope(q, cos[m:m + 1], sin[m:m + 1])
-        kn = apply_rope(k, cos[n:n + 1], sin[n:n + 1])
+        qm = apply_rope(q, cos[m : m + 1], sin[m : m + 1])
+        kn = apply_rope(k, cos[n : n + 1], sin[n : n + 1])
         return (qm * kn).sum(-1)
 
     # same relative offset -> same score
@@ -42,8 +42,13 @@ def test_rope_translation_invariance():
 
 def test_modern_model_forward_and_generate():
     cfg = ModelConfig(
-        vocab_size=65, block_size=128, n_layer=2, n_head=4, n_embd=64,
-        rmsnorm=True, rope=True,
+        vocab_size=65,
+        block_size=128,
+        n_layer=2,
+        n_head=4,
+        n_embd=64,
+        rmsnorm=True,
+        rope=True,
     )
     model = GPT(cfg)
     # RoPE removes the learned positional embedding entirely

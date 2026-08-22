@@ -18,7 +18,7 @@ from pathlib import Path
 import torch
 
 from picolm import _version
-from picolm.config import ModelConfig, PICO_CONFIG
+from picolm.config import PICO_CONFIG, ModelConfig
 from picolm.model import GPT
 from picolm.tokenizer import BPETokenizer, CharTokenizer
 
@@ -48,7 +48,11 @@ def _build_parser() -> argparse.ArgumentParser:
     t.add_argument("--block-size", type=int, default=None)
     t.add_argument("--dropout", type=float, default=None)
     t.add_argument("--seed", type=int, default=42)
-    t.add_argument("--grad-checkpoint", action="store_true", help="recompute block activations in backward (less memory, more compute)")
+    t.add_argument(
+        "--grad-checkpoint",
+        action="store_true",
+        help="recompute block activations in backward (less memory, more compute)",
+    )
 
     g = sub.add_parser("generate", help="generate text from a checkpoint")
     g.add_argument("--ckpt", required=True)
@@ -201,9 +205,10 @@ def _cmd_demo(_args) -> int:
     import picolm
 
     demo = Path(picolm.__file__).parent / "demo.py"
-    return subprocess.call(
-        [sys.executable, "-m", "streamlit", "run", str(demo)]
-    )
+    try:
+        return subprocess.call([sys.executable, "-m", "streamlit", "run", str(demo)])
+    except KeyboardInterrupt:
+        return 0
 
 
 def main(argv: list[str] | None = None) -> int:

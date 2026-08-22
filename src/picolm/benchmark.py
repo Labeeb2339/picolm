@@ -17,6 +17,13 @@ from picolm.eval import model_perplexity
 from picolm.inference import dequantize_int8, generate_kv, quantize_int8
 
 
+def _synchronize_if_cuda(device: torch.device) -> None:
+    """Finish queued CUDA work so wall-clock timings are meaningful."""
+
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+
+
 def benchmark_generation(
     model,
     idx: torch.Tensor,
@@ -28,17 +35,23 @@ def benchmark_generation(
     """Time eager (recompute) vs KV-cache decoding in tokens/sec."""
     model.eval()
 
-    # Warm up CUDA kernels before timing.
+    # Warm up both paths before timing so compilation/cache effects are excluded.
     with torch.inference_mode():
         model.generate(idx, warmup, temperature, top_k)
+        generate_kv(model, idx, warmup, temperature, top_k)
+    _synchronize_if_cuda(idx.device)
 
     with torch.inference_mode():
+        _synchronize_if_cuda(idx.device)
         t0 = time.perf_counter()
         model.generate(idx, max_new_tokens, temperature, top_k)
+        _synchronize_if_cuda(idx.device)
         eager_s = time.perf_counter() - t0
 
+        _synchronize_if_cuda(idx.device)
         t0 = time.perf_counter()
         generate_kv(model, idx, max_new_tokens, temperature, top_k)
+        _synchronize_if_cuda(idx.device)
         kv_s = time.perf_counter() - t0
 
     return {
@@ -59,21 +72,32 @@ def quantization_impact(
     batch_size: int,
     device: torch.device,
     num_batches: int = 50,
+    seed: int = 42,
 ) -> dict:
-    """Measure perplexity before and after a float32 -> int8 -> float32 trip."""
+    """Compare fp32 and int8 on the same seeded validation windows."""
     from picolm.inference import model_size_bytes
 
     _, ppl_fp32 = model_perplexity(
-        model, data, block_size, batch_size, device, num_batches
+        model, data, block_size, batch_size, device, num_batches, seed
     )
 
+    original = {
+        name: parameter.detach().clone()
+        for name, parameter in model.named_parameters()
+        if "weight" in name and parameter.dim() >= 2
+    }
     q, scales = quantize_int8(model)
     size = model_size_bytes(model, q, scales)
-    dequantize_int8(model, q, scales)
-
-    _, ppl_int8 = model_perplexity(
-        model, data, block_size, batch_size, device, num_batches
-    )
+    try:
+        dequantize_int8(model, q, scales)
+        _, ppl_int8 = model_perplexity(
+            model, data, block_size, batch_size, device, num_batches, seed
+        )
+    finally:
+        with torch.no_grad():
+            for name, parameter in model.named_parameters():
+                if name in original:
+                    parameter.copy_(original[name])
 
     delta = ppl_int8 - ppl_fp32
     return {

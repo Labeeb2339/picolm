@@ -1,0 +1,8 @@
+include README.md
+include MODEL_CARD.md
+include REPRODUCIBILITY.md
+include reproducibility/artifacts.json
+include reproducibility/environment-windows-cu128.txt
+include reproducibility/receipts/README.md
+recursive-exclude reproducibility/receipts *.json
+recursive-include scripts *.py *.ps1

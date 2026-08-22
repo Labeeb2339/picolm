@@ -9,9 +9,11 @@ survives a crash.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
+import platform
 import time
 from pathlib import Path
 
@@ -27,15 +29,19 @@ def get_batch(
     block_size: int,
     batch_size: int,
     device: torch.device,
+    *,
+    generator: torch.Generator | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Sample a random (x, y) batch of contiguous token sequences."""
-    ix = torch.randint(len(data) - block_size, (batch_size,))
+    ix = torch.randint(len(data) - block_size, (batch_size,), generator=generator)
     x = torch.stack([data[i : i + block_size] for i in ix])
     y = torch.stack([data[i + 1 : i + block_size + 1] for i in ix])
     return x.to(device), y.to(device)
 
 
-def _cosine_lr(it: int, warmup: int, decay_iters: int, lr_min: float, lr_max: float) -> float:
+def _cosine_lr(
+    it: int, warmup: int, decay_iters: int, lr_min: float, lr_max: float
+) -> float:
     if it < warmup:
         return lr_max * (it + 1) / warmup
     if it > decay_iters:
@@ -124,6 +130,8 @@ def train(
     out_dir = Path(out_dir)
     if is_rank0:
         out_dir.mkdir(parents=True, exist_ok=True)
+        # A new run must not append evidence to an older run in the same folder.
+        (out_dir / "metrics.jsonl").write_text("", encoding="utf-8")
 
     # --- tokenize ----------------------------------------------------------
     if tokenizer_type == "bpe":
@@ -147,14 +155,18 @@ def train(
         )
 
     raw_model = GPT(config).to(dev)
-    n_params = raw_model.get_num_params()
+    n_params_non_positional = raw_model.get_num_params(non_embedding=True)
+    n_params_total = raw_model.get_num_params(non_embedding=False)
     model = raw_model
     if ddp:
         from torch.nn.parallel import DistributedDataParallel as DDP
 
         model = DDP(raw_model, device_ids=[local_rank])
     if is_rank0:
-        print(f"[picolm] parameters: {n_params:,}")
+        print(
+            f"[picolm] parameters: {n_params_total:,} total; "
+            f"{n_params_non_positional:,} excluding learned positions"
+        )
 
     # Custom GPT methods (configure_optimizers/save/generate) live on the raw
     # module; DDP only wraps the forward/backward path.
@@ -166,6 +178,7 @@ def train(
     samples: list[dict] = []
     t0 = time.time()
     best_val = float("inf")
+    best_step: int | None = None
 
     for it in range(max_iters + 1):
         lr = _cosine_lr(it, warmup_iters, max_iters, learning_rate * 0.1, learning_rate)
@@ -174,8 +187,13 @@ def train(
 
         if it % eval_interval == 0:
             losses = estimate_loss(
-                model, train_data, val_data, config.block_size,
-                batch_size, eval_iters, dev,
+                model,
+                train_data,
+                val_data,
+                config.block_size,
+                batch_size,
+                eval_iters,
+                dev,
             )
             elapsed = time.time() - t0
             if is_rank0:
@@ -184,20 +202,26 @@ def train(
                     f"val loss {losses['val']:.4f} | lr {lr:.2e} | {elapsed:.1f}s"
                 )
                 # Incremental, crash-safe metrics: append one line per eval.
-                with open(out_dir / "metrics.jsonl", "a") as f:
-                    f.write(json.dumps({
-                        "step": it,
-                        "train_loss": round(losses["train"], 4),
-                        "val_loss": round(losses["val"], 4),
-                        "lr": lr,
-                        "elapsed_s": round(elapsed, 1),
-                    }) + "\n")
+                with (out_dir / "metrics.jsonl").open("a", encoding="utf-8") as f:
+                    f.write(
+                        json.dumps(
+                            {
+                                "step": it,
+                                "train_loss": round(losses["train"], 4),
+                                "val_loss": round(losses["val"], 4),
+                                "lr": lr,
+                                "elapsed_s": round(elapsed, 1),
+                            }
+                        )
+                        + "\n"
+                    )
             train_losses.append(losses["train"])
             val_losses.append(losses["val"])
 
             # Early stopping: keep the best-by-validation-loss checkpoint.
             if losses["val"] < best_val:
                 best_val = losses["val"]
+                best_step = it
                 if is_rank0:
                     raw_model.save(str(out_dir / "ckpt.pt"))
                     tok.save(out_dir / "tokenizer.json")
@@ -206,14 +230,16 @@ def train(
             if is_rank0:
                 ctx = torch.zeros((1, 1), dtype=torch.long, device=dev)
                 with torch.inference_mode():
-                    gen = raw_model.generate(ctx, max_new_tokens=120, temperature=0.8, top_k=40)
+                    gen = raw_model.generate(
+                        ctx, max_new_tokens=120, temperature=0.8, top_k=40
+                    )
                 samples.append({"step": it, "text": tok.decode(gen[0].tolist())})
 
         # one training step
         xb, yb = get_batch(train_data, config.block_size, batch_size, dev)
         if use_amp:
             with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
-                logits, loss = model(xb, yb)
+                _logits, loss = model(xb, yb)
             optimizer.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -221,7 +247,7 @@ def train(
             scaler.step(optimizer)
             scaler.update()
         else:
-            logits, loss = model(xb, yb)
+            _logits, loss = model(xb, yb)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
@@ -241,6 +267,7 @@ def train(
         # more so ``ckpt.pt`` is always the best-by-val-loss model.
         if final_losses["val"] < best_val:
             best_val = final_losses["val"]
+            best_step = max_iters
             raw_model.save(str(out_dir / "ckpt.pt"))
             tok.save(out_dir / "tokenizer.json")
         model_path = out_dir / "ckpt.pt"
@@ -265,7 +292,22 @@ def train(
             "train_loss": train_losses,
             "val_loss": val_losses,
             "samples": samples,
-            "params": n_params,
+            # ``params`` is retained for compatibility with older plotting code.
+            "params": n_params_non_positional,
+            "params_non_positional": n_params_non_positional,
+            "params_total": n_params_total,
+            "best_checkpoint_step": best_step,
+            "seed": seed,
+            "eval_iters": eval_iters,
+            "warmup_iters": warmup_iters,
+            "weight_decay": weight_decay,
+            "betas": list(betas),
+            "grad_clip": grad_clip,
+            "data_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "data_characters": len(text),
+            "python_version": platform.python_version(),
+            "torch_version": torch.__version__,
+            "torch_cuda_runtime": torch.version.cuda,
             "elapsed_seconds": round(elapsed, 1),
             "model_path": str(model_path),
         }

@@ -7,12 +7,11 @@ import torch
 
 from picolm.flash_attn import flash_attention, flash_available
 
-
 pytestmark = pytest.mark.skipif(not flash_available(), reason="requires Triton + CUDA")
 
 
 def eager_attention(q, k, v):
-    B, H, T, D = q.shape
+    _B, _H, T, D = q.shape
     scale = 1.0 / math.sqrt(D)
     s = (q @ k.transpose(-2, -1)) * scale
     causal = torch.tril(torch.ones(T, T, device=q.device, dtype=torch.bool))

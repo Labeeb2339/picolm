@@ -8,8 +8,13 @@ from picolm.model import GPT
 
 def _model(grad_checkpoint: bool) -> GPT:
     cfg = ModelConfig(
-        vocab_size=65, block_size=64, n_layer=3, n_head=3, n_embd=96,
-        dropout=0.0, grad_checkpoint=grad_checkpoint,
+        vocab_size=65,
+        block_size=64,
+        n_layer=3,
+        n_head=3,
+        n_embd=96,
+        dropout=0.0,
+        grad_checkpoint=grad_checkpoint,
     )
     return GPT(cfg)
 
@@ -51,7 +56,11 @@ def test_grad_checkpoint_reduces_activation_memory():
         base = torch.cuda.max_memory_allocated() if torch.cuda.is_available() else 0
         _, loss = model(x, y)
         loss.backward()
-        return (torch.cuda.max_memory_allocated() - base) if torch.cuda.is_available() else None
+        return (
+            (torch.cuda.max_memory_allocated() - base)
+            if torch.cuda.is_available()
+            else None
+        )
 
     if torch.cuda.is_available():
         m_plain = peak(plain)

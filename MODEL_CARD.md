@@ -11,7 +11,7 @@ evaluated, and what it is and is not good for.
 | Field | Value |
 |---|---|
 | Architecture | Decoder-only transformer (GPT-2 style) |
-| Parameters | 10,646,784 (~10.6M) |
+| Trainable parameters | 10,745,088 total; 10,646,784 excluding learned positional embeddings |
 | Layers / heads / dim | 6 / 6 / 384 |
 | Context length | 256 tokens |
 | Vocab size | 65 (character-level) |
@@ -26,7 +26,7 @@ evaluated, and what it is and is not good for.
 | Field | Value |
 |---|---|
 | Dataset | tiny Shakespeare (1,115,394 characters) |
-| Train / val split | 90 / 10 (stratified contiguous split) |
+| Train / val split | 90 / 10 (first/last contiguous split) |
 | Iterations | 2,000 |
 | Batch size | 64 |
 | Sequence length | 256 |
@@ -50,9 +50,9 @@ Best checkpoint selected by validation loss (step 1,250).
 |---|---|---|
 | Unigram baseline (most frequent char) | — | 28.43 |
 | Bigram baseline (prev → next char) | — | 11.96 |
-| **PicoLM** | **1.517** | **4.56** |
+| **PicoLM** | **1.523** | **4.59** |
 
-PicoLM is **2.62× better than the bigram baseline** and **6.24× better than the
+PicoLM is **2.61× better than the bigram baseline** and **6.20× better than the
 unigram baseline**. Perplexity is `exp(cross-entropy loss)`.
 
 ### Quantization
@@ -62,33 +62,34 @@ Symmetric per-tensor int8 (`w → round(w / scale)`, `scale = max|w| / 127`):
 | Metric | Value |
 |---|---|
 | fp32 size | 42.98 MB |
-| int8 size | 10.74 MB |
-| Compression | 4.0× |
-| Perplexity (fp32) | 4.598 |
-| Perplexity (int8) | 4.595 |
-| Δ perplexity | −0.07% (within noise) |
+| int8 + remaining fp32 size | 10.76 MB |
+| Compression | 3.99× |
+| Perplexity (fp32) | 4.580 |
+| Perplexity (int8) | 4.579 |
+| Δ perplexity | −0.023% (same seeded windows) |
 
-Weight quantization is essentially free for this model — expected, since int8
-has plenty of dynamic range for these weight magnitudes.
+No material perplexity change is visible at the reported precision on these
+paired windows. The small negative delta is measurement/rounding behaviour, not
+evidence that quantization improves quality. This experiment measures int8
+storage followed by dequantized PyTorch evaluation; it is not an int8 execution
+kernel.
 
 ### Decode speed (200 new tokens, RTX 5070)
 
-| Method | tokens/sec | notes |
-|---|---|---|
-| Eager (recompute full prefix) | 148.6 | O(T³) total attention |
-| KV-cache (reuse past K/V) | 179.3 | O(T²) total attention |
-
-Observed speedup is **1.21×** at 200 tokens. The measured gain understates the
-asymptotic benefit: for a 10.6M-param model at short sequence lengths, GPU
-kernel-launch overhead dominates attention compute. The eager decoder
-recomputes the entire prefix every step (O(T³) total), while the KV-cache
-decoder attends only the new token against the cached history (O(T²) total),
-so the gap widens rapidly with sequence length and model size.
+Repeated synchronized local runs ranged from **0.99× to 1.54×** KV-cache
+speedup. This tiny model is dominated by Python and GPU kernel-launch overhead,
+so it does not show a stable wall-clock win at 200 tokens. The engineering
+benefit is still real: eager decoding recomputes the entire prefix every step,
+while the KV-cache reuses prior keys and values. This result is presented as a
+mechanism demonstration, not a throughput guarantee.
 
 ## Evaluation methodology
 
-- Held-out perplexity is computed over 100 random contiguous batches (64×256),
-  so the estimate is stable and free of train/val leakage.
+- Held-out perplexity uses 100 seeded contiguous batches (64×256). Repeated
+  runs select the same windows and produce the same estimate.
+- The fp32 and int8 comparison evaluates the exact same seeded windows, so its
+  delta is not contaminated by batch-sampling noise.
+- CUDA timings synchronize the device before and after each measured decoder.
 - Baselines use Laplace (add-1) smoothing and are computed on the identical
   split.
 - The loss curve (see `assets/loss.png`) shows the model beginning to overfit
@@ -106,7 +107,9 @@ so the gap widens rapidly with sequence length and model size.
   tokenizer is implemented and unit-tested but the demo model is not trained
   with it.
 - **Absolute positional embeddings.** GPT-2 style; context beyond 256 tokens is
-  out of distribution (the KV-cache clamps the positional index).
+  out of distribution. The explicit KV-cache path refuses requests beyond this
+  window because its eager-parity guarantee does not extend to sliding-window
+  decoding.
 - **No instruction tuning, no RLHF.** The model only does next-token
   prediction on Shakespeare-style text.
 - **Generated text is not factual.** It produces plausible Shakespeare-flavoured
@@ -120,6 +123,11 @@ next-token probability distribution under temperature/top-k/top-p, fp32-vs-int8
 weight histograms, and the training loss + LR curves.
 
 ## Reproducibility
+
+The complete environment, command sequence, semantic test guarantees, artifact
+hashes, and receipt commands are in [REPRODUCIBILITY.md](REPRODUCIBILITY.md).
+The reference best checkpoint SHA-256 is
+`b364afe8bee62f6612642d16394900b0d6c1944ca545e788514cf13b0d636c5a`.
 
 ```bash
 python scripts/download_data.py

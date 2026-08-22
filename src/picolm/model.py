@@ -11,8 +11,8 @@ from __future__ import annotations
 import math
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from picolm.config import ModelConfig
 
@@ -176,12 +176,14 @@ class GPT(nn.Module):
         config.validate()
         self.config = config
 
-        modules = dict(
-            wte=nn.Embedding(config.vocab_size, config.n_embd),
-            drop=nn.Dropout(config.dropout),
-            h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f=RMSNorm(config.n_embd) if config.rmsnorm else nn.LayerNorm(config.n_embd, bias=config.bias),
-        )
+        modules = {
+            "wte": nn.Embedding(config.vocab_size, config.n_embd),
+            "drop": nn.Dropout(config.dropout),
+            "h": nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+            "ln_f": RMSNorm(config.n_embd)
+            if config.rmsnorm
+            else nn.LayerNorm(config.n_embd, bias=config.bias),
+        }
         if not config.rope:
             modules["wpe"] = nn.Embedding(config.block_size, config.n_embd)
         self.transformer = nn.ModuleDict(modules)
@@ -211,6 +213,11 @@ class GPT(nn.Module):
         return next(self.parameters()).device
 
     def get_num_params(self, non_embedding: bool = True) -> int:
+        """Count parameters, optionally excluding learned position embeddings.
+
+        ``non_embedding=True`` preserves the nanoGPT reporting convention. Use
+        ``False`` when reporting the literal total number of trainable values.
+        """
         n = sum(p.numel() for p in self.parameters())
         if non_embedding and "wpe" in self.transformer:
             n -= self.transformer.wpe.weight.numel()  # positional embeddings
@@ -228,7 +235,7 @@ class GPT(nn.Module):
         Returns:
             (logits, loss) where loss is None when targets is None.
         """
-        B, T = idx.size()
+        _B, T = idx.size()
         assert T <= self.config.block_size, (
             f"sequence length {T} exceeds block_size {self.config.block_size}"
         )
@@ -253,9 +260,7 @@ class GPT(nn.Module):
 
         loss = None
         if targets is not None:
-            loss = F.cross_entropy(
-                logits.view(-1, logits.size(-1)), targets.view(-1)
-            )
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
         return logits, loss
 
     @torch.no_grad()
@@ -335,10 +340,13 @@ class GPT(nn.Module):
         )
 
     @classmethod
-    def load(cls, path: str, map_location: str | None = None) -> "GPT":
-        # weights_only=False because the checkpoint bundles the ModelConfig
-        # dataclass alongside the state_dict (a trusted, self-produced file).
-        ckpt = torch.load(path, map_location=map_location, weights_only=False)
+    def load(cls, path: str, map_location: str | torch.device | None = "cpu") -> GPT:
+        # ModelConfig is the sole allow-listed non-tensor type in our checkpoint.
+        # This avoids arbitrary pickle execution when a path is selected in the UI.
+        # CPU is the portable default for checkpoints saved from CUDA; callers
+        # can move the constructed model to their selected device afterwards.
+        with torch.serialization.safe_globals([ModelConfig]):
+            ckpt = torch.load(path, map_location=map_location, weights_only=True)
         model = cls(ckpt["config"])
         model.load_state_dict(ckpt["state_dict"])
         return model

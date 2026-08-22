@@ -26,3 +26,11 @@ jobs:
 
       - name: Run tests
         run: pytest
+
+      - name: Static checks
+        run: ruff check .
+
+      - name: Verify dependencies and package build
+        run: |
+          pip check
+          python -m build

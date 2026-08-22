@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from itertools import pairwise
 from pathlib import Path
 
 
@@ -35,7 +36,7 @@ class CharTokenizer:
         return len(self.chars)
 
     @classmethod
-    def fit(cls, text: str) -> "CharTokenizer":
+    def fit(cls, text: str) -> CharTokenizer:
         return cls(sorted(set(text)))
 
     def encode(self, text: str) -> list[int]:
@@ -45,11 +46,13 @@ class CharTokenizer:
         return "".join(self.itos[i] for i in ids)
 
     def save(self, path: Path) -> None:
-        json.dump(self.chars, open(path, "w", encoding="utf-8"), ensure_ascii=False)
+        with path.open("w", encoding="utf-8") as stream:
+            json.dump(self.chars, stream, ensure_ascii=False)
 
     @classmethod
-    def load(cls, path: Path) -> "CharTokenizer":
-        return cls(json.load(open(path, encoding="utf-8")))
+    def load(cls, path: Path) -> CharTokenizer:
+        with path.open(encoding="utf-8") as stream:
+            return cls(json.load(stream))
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +60,7 @@ class CharTokenizer:
 # ---------------------------------------------------------------------------
 def _get_pair_stats(ids: list[int]) -> Counter:
     """Count adjacent pairs in a token-id sequence."""
-    return Counter(zip(ids, ids[1:]))
+    return Counter(pairwise(ids))
 
 
 def _merge(ids: list[int], pair: tuple[int, int], new_id: int) -> list[int]:
@@ -127,12 +130,14 @@ class BPETokenizer:
             "merges": {f"{a},{b}": v for (a, b), v in self.merges.items()},
             "vocab": {str(k): list(v) for k, v in self.vocab.items()},
         }
-        json.dump(data, open(path, "w", encoding="utf-8"))
+        with path.open("w", encoding="utf-8") as stream:
+            json.dump(data, stream)
 
     @classmethod
-    def load(cls, path: Path) -> "BPETokenizer":
+    def load(cls, path: Path) -> BPETokenizer:
         tok = cls()
-        data = json.load(open(path, encoding="utf-8"))
+        with path.open(encoding="utf-8") as stream:
+            data = json.load(stream)
         tok.merges = {}
         for key, value in data["merges"].items():
             a, b = key.split(",")

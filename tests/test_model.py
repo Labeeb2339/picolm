@@ -65,6 +65,16 @@ def test_save_load_roundtrip(tmp_path):
     assert torch.allclose(a, b, atol=1e-6)
 
 
+def test_checkpoint_loader_defaults_to_cpu(tmp_path):
+    model = make_model()
+    path = tmp_path / "ckpt.pt"
+    model.save(str(path))
+
+    loaded = GPT.load(str(path))
+
+    assert loaded.device.type == "cpu"
+
+
 def test_causal_masking():
     """Perturbing future tokens must not change past-token logits."""
     model = make_model().eval()
