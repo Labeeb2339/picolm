@@ -75,6 +75,6 @@
     "KV-cache timing is hardware- and run-dependent; local 200-token runs ranged from parity to 1.61x.",
     "HellaSwag is an out-of-domain harness check and the recorded result is chance-level.",
     "GPU retraining is seed-controlled but not promised to be bit-identical across PyTorch, CUDA, driver, or GPU versions.",
-    "The original training run predates a Git-SHA receipt; a later evaluation-only run is bound to clean source commit 148a0d28724c505790a8e79c85d61a8c06932f45."
+    "The original training run predates a Git-SHA receipt; a later evaluation-only run is bound to clean source commit e46f4d237a620f3f00d6ed609f17a22d8d6d1cc4."
   ]
 }

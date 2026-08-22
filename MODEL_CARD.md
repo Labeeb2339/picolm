@@ -76,12 +76,12 @@ kernel.
 
 ### Decode speed (200 new tokens, RTX 5070)
 
-Earlier synchronized local runs ranged from **0.99× to 1.54×** KV-cache
-speedup. The clean `148a0d2` run measured **1.61×** (308.3 eager vs 495.9
-cached tokens/s). This tiny model is sensitive to Python, kernel-launch, and
-machine-load overhead, so the spread is presented as a mechanism demonstration,
-not a throughput guarantee. Eager decoding recomputes the entire prefix each
-step; the KV-cache reuses prior keys and values.
+Synchronized local runs ranged from **0.99× to 1.61×** KV-cache speedup. The
+portable clean `e46f4d2` run measured **1.54×** (310.6 eager vs 478.0 cached
+tokens/s). This tiny model is sensitive to Python, kernel-launch, and machine-load
+overhead, so the spread is presented as a mechanism demonstration, not a
+throughput guarantee. Eager decoding recomputes the entire prefix each step; the
+KV-cache reuses prior keys and values.
 
 ## Evaluation methodology
 

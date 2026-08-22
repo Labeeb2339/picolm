@@ -154,10 +154,14 @@ raw bytes for untracked files. This keeps the source fingerprint stable across
 Git checkout line-ending filters while the recorded clean/dirty state and patch
 hashes still expose any source changes outside the index.
 
-The published reference bundle at
-[`out/evidence/20260822-235049/`](out/evidence/20260822-235049/) binds the full
-run to clean source commit `148a0d28724c505790a8e79c85d61a8c06932f45` and
-includes every captured log, `receipt.json`, and their SHA-256 checksums.
+The portable reference bundle at
+[`out/evidence/20260823-001218/`](out/evidence/20260823-001218/) binds the full
+run to clean source commit `e46f4d237a620f3f00d6ed609f17a22d8d6d1cc4` and
+includes every captured log, schema-v2 `receipt.json`, and their SHA-256
+checksums. It supersedes the 2026-08-22 bundle for source-file verification:
+that schema-v1 receipt hashed Windows checkout bytes, so one non-executable text
+asset differed from its canonical Git blob only by line endings. The measured
+evaluation outputs were unaffected.
 
 Deterministic perplexity and baselines (100 seeded validation batches):
 
