@@ -3,8 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
+from pathlib import Path
 
-import scripts.repro_receipt as receipt
+RECEIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "repro_receipt.py"
+RECEIPT_SPEC = importlib.util.spec_from_file_location(
+    "picolm_repro_receipt", RECEIPT_PATH
+)
+if RECEIPT_SPEC is None or RECEIPT_SPEC.loader is None:
+    raise ImportError(f"could not load receipt script from {RECEIPT_PATH}")
+receipt = importlib.util.module_from_spec(RECEIPT_SPEC)
+RECEIPT_SPEC.loader.exec_module(receipt)
 
 
 def test_source_manifest_hashes_git_blob_not_checkout_line_endings(
